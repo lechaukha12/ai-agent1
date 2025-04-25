@@ -1,33 +1,36 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: k8s-log-agent # Đổi tên Deployment
-  namespace: kube-observability # Namespace mới
+  name: k8s-log-agent
+  namespace: kube-observability
   labels:
-    app: k8s-log-agent # Đổi label
+    app: k8s-log-agent
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: k8s-log-agent # Đổi label selector
+      app: k8s-log-agent
   template:
     metadata:
       labels:
-        app: k8s-log-agent # Đổi label pod
+        app: k8s-log-agent
     spec:
-      serviceAccountName: k8s-log-agent-sa # Sử dụng Service Account đã đổi tên
+      serviceAccountName: k8s-log-agent-sa
       containers:
       - name: agent
-        # !!! THAY THẾ BẰNG TÊN IMAGE CỦA BẠN (ví dụ: v0.6) !!!
-        image: your-dockerhub-username/k8s-log-agent:v1.0 # Giữ tên image nhưng có thể tăng version
+        # !!! THAY THẾ BẰNG TÊN IMAGE CỦA BẠN (ví dụ: v0.7) !!!
+        image: lechaukha12/ai-agent1:v1.0.2
         imagePullPolicy: Always
         envFrom:
           - configMapRef:
-              # Giữ nguyên tên ConfigMap hoặc đổi nếu muốn (ví dụ: k8s-log-agent-config)
               name: k8s-log-agent-config
           - secretRef:
-              # Giữ nguyên tên Secret hoặc đổi nếu muốn (ví dụ: k8s-log-agent-secret)
               name: k8s-log-agent-secret
+        # --- BẮT ĐẦU THAY ĐỔI: Thêm biến môi trường TZ ---
+        env:
+        - name: TZ
+          value: Asia/Ho_Chi_Minh # Đặt múi giờ cho container
+        # --- KẾT THÚC THAY ĐỔI ---
         resources:
           requests:
             cpu: "150m"

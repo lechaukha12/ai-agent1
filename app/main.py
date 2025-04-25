@@ -9,12 +9,23 @@ from dotenv import load_dotenv
 import re
 from kubernetes import client, config, watch
 from kubernetes.client.exceptions import ApiException
+# --- BẮT ĐẦU THAY ĐỔI: Import ZoneInfo ---
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    # Fallback cho Python < 3.9 (mặc dù base image là 3.10)
+    # Cần cài pytz: pip install pytz
+    # from pytz import timezone as ZoneInfo # Nếu cần fallback
+    logging.error("zoneinfo module not found. Please use Python 3.9+ or install pytz and uncomment the fallback.")
+    exit(1)
+# --- KẾT THÚC THAY ĐỔI ---
 
 
 # --- Tải biến môi trường từ file .env (cho phát triển cục bộ) ---
 load_dotenv()
 
 # --- Cấu hình Logging ---
+# Thời gian log bây giờ sẽ theo biến TZ của container (Asia/Ho_Chi_Minh)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Tải cấu hình từ biến môi trường ---
@@ -31,6 +42,15 @@ MIN_LOG_LEVEL_FOR_GEMINI = os.environ.get("MIN_LOG_LEVEL_FOR_GEMINI", "INFO")
 GEMINI_MODEL_NAME = os.environ.get("GEMINI_MODEL_NAME", "gemini-1.5-flash")
 ALERT_SEVERITY_LEVELS_STR = os.environ.get("ALERT_SEVERITY_LEVELS", "ERROR,CRITICAL")
 ALERT_SEVERITY_LEVELS = [level.strip().upper() for level in ALERT_SEVERITY_LEVELS_STR.split(',') if level.strip()]
+
+# --- BẮT ĐẦU THAY ĐỔI: Định nghĩa múi giờ HCM ---
+try:
+    HCM_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+except Exception as e:
+    logging.error(f"Could not load timezone 'Asia/Ho_Chi_Minh': {e}. Ensure timezone data is available.")
+    HCM_TZ = timezone.utc # Fallback về UTC nếu không load được
+# --- KẾT THÚC THAY ĐỔI ---
+
 
 # --- Cấu hình Kubernetes Client ---
 try:
@@ -169,11 +189,8 @@ def format_k8s_context(pod_info, node_info, pod_events):
 
 
 # --- Hàm tương tác với Gemini ---
+# (Giữ nguyên logic xử lý JSON)
 def analyze_with_gemini(log_batch, k8s_context=""):
-    """
-    Gửi một lô log và ngữ cảnh K8s đến Gemini để phân tích.
-    Cố gắng xử lý JSON bị lỗi nhẹ.
-    """
     if not log_batch: return None
     first_log_namespace = log_batch[0].get('labels', {}).get('namespace', 'unknown')
     log_text = "\n".join([f"[{entry['timestamp'].isoformat()}] {entry.get('labels', {}).get('pod', 'unknown_pod')}: {entry['message']}" for entry in log_batch])
@@ -192,86 +209,46 @@ def analyze_with_gemini(log_batch, k8s_context=""):
     """
     logging.info(f"Sending {len(log_batch)} logs ({len(log_text)} chars) and context ({len(k8s_context)} chars) from namespace '{first_log_namespace}' to Gemini for analysis...")
     try:
-        # --- BẮT ĐẦU THAY ĐỔI: Giới hạn max_output_tokens ---
-        response = gemini_model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.2,
-                max_output_tokens=250 # Giới hạn số token trả về để tránh bị cắt ngang
-            ),
-            request_options={'timeout': 90}
-        )
-        # --- KẾT THÚC THAY ĐỔI ---
-
-        if not response.parts:
-                logging.warning("Gemini response has no parts.");
-                if hasattr(response, 'prompt_feedback') and response.prompt_feedback: logging.warning(f"Gemini prompt feedback: {response.prompt_feedback}")
-                return None
-
-        response_text = response.text.strip()
-        # --- BẮT ĐẦU THAY ĐỔI: Log toàn bộ response thô khi có lỗi parse ---
-        logging.info(f"Received response from Gemini (raw): {response_text}") # Log trước khi parse
-
-        # Cố gắng dọn dẹp response trước khi parse
+        response = gemini_model.generate_content(prompt, generation_config=genai.types.GenerationConfig(temperature=0.2, max_output_tokens=250), request_options={'timeout': 90})
+        if not response.parts: logging.warning("Gemini response has no parts."); return None
+        response_text = response.text.strip(); logging.info(f"Received response from Gemini (raw): {response_text}")
         cleaned_response_text = response_text
-        if cleaned_response_text.startswith("```json"):
-            cleaned_response_text = cleaned_response_text.strip("```json").strip("`").strip()
-        elif cleaned_response_text.startswith("```"):
-                cleaned_response_text = cleaned_response_text.strip("```").strip()
-        # Thử tìm JSON hợp lệ đầu tiên trong chuỗi (phòng trường hợp có text thừa)
-        match = re.search(r'\{.*\}', cleaned_response_text, re.DOTALL)
-        if match:
-            json_string_to_parse = match.group(0)
-        else:
-            json_string_to_parse = cleaned_response_text # Dùng bản gốc nếu không tìm thấy {}
-
+        if cleaned_response_text.startswith("```json"): cleaned_response_text = cleaned_response_text.strip("```json").strip("`").strip()
+        elif cleaned_response_text.startswith("```"): cleaned_response_text = cleaned_response_text.strip("```").strip()
+        match = re.search(r'\{.*\}', cleaned_response_text, re.DOTALL); json_string_to_parse = match.group(0) if match else cleaned_response_text
         try:
             analysis_result = json.loads(json_string_to_parse)
-            if "severity" in analysis_result:
-                logging.info(f"Successfully parsed Gemini JSON: {analysis_result}")
-                return analysis_result
-            else:
-                logging.warning(f"Gemini response JSON missing 'severity' key. Raw response: {response_text}")
-                severity = "WARNING"; summary_vi = "Không thể phân tích JSON từ Gemini (thiếu key 'severity'). Phản hồi thô: " + response_text[:200]
-                if "CRITICAL" in response_text.upper(): severity = "CRITICAL"
-                elif "ERROR" in response_text.upper(): severity = "ERROR"
-                return {"severity": severity, "summary": summary_vi}
-
-        except json.JSONDecodeError as json_err:
-            # Log lỗi cụ thể và toàn bộ response thô
-            logging.warning(f"Failed to decode Gemini response as JSON: {json_err}. Raw response: {response_text}")
-            severity = "WARNING"; summary_vi = f"Phản hồi Gemini không phải JSON hợp lệ ({json_err}): " + response_text[:200]
-            if "CRITICAL" in response_text.upper(): severity = "CRITICAL"
-            elif "ERROR" in response_text.upper(): severity = "ERROR"
-            return {"severity": severity, "summary": summary_vi}
-        # --- KẾT THÚC THAY ĐỔI ---
-
+            if "severity" in analysis_result: logging.info(f"Successfully parsed Gemini JSON: {analysis_result}"); return analysis_result
+            else: logging.warning(f"Gemini response JSON missing 'severity' key. Raw response: {response_text}"); severity = "WARNING"; summary_vi = "Không thể phân tích JSON từ Gemini (thiếu key 'severity'). Phản hồi thô: " + response_text[:200]; return {"severity": severity, "summary": summary_vi}
+        except json.JSONDecodeError as json_err: logging.warning(f"Failed to decode Gemini response as JSON: {json_err}. Raw response: {response_text}"); severity = "WARNING"; summary_vi = f"Phản hồi Gemini không phải JSON hợp lệ ({json_err}): " + response_text[:200]; return {"severity": severity, "summary": summary_vi}
     except Exception as e: logging.error(f"Error calling Gemini API: {e}", exc_info=True); return None
 
 # --- Hàm gửi cảnh báo Telegram ---
 # (Giữ nguyên)
 def send_telegram_alert(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID: logging.warning("Telegram Bot Token or Chat ID is not configured. Skipping alert."); return
-    telegram_api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    max_len = 4096; truncated_message = message[:max_len-50] + "..." if len(message) > max_len else message
+    telegram_api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"; max_len = 4096; truncated_message = message[:max_len-50] + "..." if len(message) > max_len else message
     payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': truncated_message, 'parse_mode': 'Markdown'}
-    try:
-        response = requests.post(telegram_api_url, json=payload, timeout=10); response.raise_for_status()
-        logging.info(f"Sent alert to Telegram. Response: {response.json()}")
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error sending Telegram alert: {e}")
-        if e.response is not None: logging.error(f"Telegram API Response Status: {e.response.status_code}\nTelegram API Response Body: {e.response.text}")
+    try: response = requests.post(telegram_api_url, json=payload, timeout=10); response.raise_for_status(); logging.info(f"Sent alert to Telegram. Response: {response.json()}")
+    except requests.exceptions.RequestException as e: logging.error(f"Error sending Telegram alert: {e}");
     except Exception as e: logging.error(f"An unexpected error occurred during Telegram send: {e}", exc_info=True)
 
 # --- Vòng lặp chính của Agent ---
-# (Giữ nguyên)
 def main_loop():
+    """
+    Vòng lặp chính: Query Loki, lấy ngữ cảnh K8s, phân tích, gửi cảnh báo.
+    """
     last_query_time = datetime.now(timezone.utc) - timedelta(minutes=LOKI_QUERY_RANGE_MINUTES)
     while True:
-        current_time = datetime.now(timezone.utc); start_query = last_query_time + timedelta(seconds=1); end_query = current_time
+        # Lấy thời gian hiện tại (vẫn dùng UTC cho logic nội bộ)
+        current_time = datetime.now(timezone.utc)
+        start_query = last_query_time + timedelta(seconds=1)
+        end_query = current_time
         if start_query >= end_query: logging.info(f"Start time {start_query} is after or equal to end time {end_query}. Skipping query cycle."); last_query_time = end_query; time.sleep(QUERY_INTERVAL_SECONDS); continue
+
         log_entries = query_loki(start_query, end_query)
         if log_entries is None: logging.error("Configuration error detected in query_loki. Stopping agent."); break
+
         if log_entries:
             logs_to_analyze = preprocess_and_filter(log_entries)
             if logs_to_analyze:
@@ -282,6 +259,7 @@ def main_loop():
                     pod_key = f"{ns}/{pod}";
                     if pod_key not in logs_by_pod: logs_by_pod[pod_key] = []
                     logs_by_pod[pod_key].append(log)
+
                 for pod_key, pod_logs in logs_by_pod.items():
                     namespace, pod_name = pod_key.split('/', 1); logging.info(f"Processing {len(pod_logs)} logs for pod '{pod_key}'")
                     pod_info = get_pod_info(namespace, pod_name); node_info = None; pod_events = []
@@ -295,10 +273,25 @@ def main_loop():
                             logging.info(f"Gemini analysis result for '{pod_key}': Severity={severity}, Summary={summary}")
                             if severity in ALERT_SEVERITY_LEVELS:
                                 sample_logs = "\n".join([f"- `{log['message'][:150]}`" for log in batch[:3]])
-                                alert_message = f"""🚨 *Cảnh báo Log K8s (Pod: {pod_key})* 🚨\n*Mức độ:* `{severity}`\n*Tóm tắt:* {summary}\n*Khoảng thời gian log:* `{start_query.strftime('%Y-%m-%d %H:%M:%S')}` - `{end_query.strftime('%Y-%m-%d %H:%M:%S')}` UTC\n*Log mẫu:*\n{sample_logs}\n\n_Vui lòng kiểm tra log và trạng thái pod/node/events trên K8s để biết thêm chi tiết._"""
+
+                                # --- BẮT ĐẦU THAY ĐỔI: Chuyển đổi thời gian sang HCM TZ cho cảnh báo ---
+                                start_query_hcm = start_query.astimezone(HCM_TZ)
+                                end_query_hcm = end_query.astimezone(HCM_TZ)
+                                time_format = '%Y-%m-%d %H:%M:%S %Z' # Định dạng giờ Việt Nam
+                                # --- KẾT THÚC THAY ĐỔI ---
+
+                                alert_message = f"""🚨 *Cảnh báo Log K8s (Pod: {pod_key})* 🚨
+*Mức độ:* `{severity}`
+*Tóm tắt:* {summary}
+*Khoảng thời gian log:* `{start_query_hcm.strftime(time_format)}` - `{end_query_hcm.strftime(time_format)}`
+*Log mẫu:*
+{sample_logs}
+
+_Vui lòng kiểm tra log và trạng thái pod/node/events trên K8s để biết thêm chi tiết._"""
                                 send_telegram_alert(alert_message)
                         else: logging.warning(f"Gemini analysis failed or returned no result for a batch in pod '{pod_key}'.")
                         time.sleep(3)
+
         last_query_time = end_query
         elapsed_time = (datetime.now(timezone.utc) - current_time).total_seconds()
         sleep_time = max(0, QUERY_INTERVAL_SECONDS - elapsed_time)
