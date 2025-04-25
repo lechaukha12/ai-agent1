@@ -27,17 +27,12 @@ LOKI_URL = os.environ.get("LOKI_URL", "http://loki-read.monitoring.svc.cluster.l
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-# --- THAY ĐỔI: Cập nhật giá trị mặc định ---
 SCAN_INTERVAL_SECONDS = int(os.environ.get("SCAN_INTERVAL_SECONDS", 30)) # Mặc định 30s
-# --- KẾT THÚC THAY ĐỔI ---
-# Khoảng thời gian quét log Loki chung
 LOKI_SCAN_RANGE_MINUTES = int(os.environ.get("LOKI_SCAN_RANGE_MINUTES", 1)) # Quét log 1 phút gần nhất
-# Khoảng thời gian lấy log chi tiết cho pod có vấn đề
 LOKI_DETAIL_LOG_RANGE_MINUTES = int(os.environ.get("LOKI_DETAIL_LOG_RANGE_MINUTES", 30)) # Lấy log 30 phút
 LOKI_QUERY_LIMIT = int(os.environ.get("LOKI_QUERY_LIMIT", 500))
 K8S_NAMESPACES_STR = os.environ.get("K8S_NAMESPACES", "kube-system")
 K8S_NAMESPACES = [ns.strip() for ns in K8S_NAMESPACES_STR.split(',') if ns.strip()]
-# Mức log tối thiểu để Loki scan tìm vấn đề
 LOKI_SCAN_MIN_LEVEL = os.environ.get("LOKI_SCAN_MIN_LEVEL", "WARNING") # Chỉ quét tìm WARNING/ERROR trở lên
 GEMINI_MODEL_NAME = os.environ.get("GEMINI_MODEL_NAME", "gemini-1.5-flash")
 ALERT_SEVERITY_LEVELS_STR = os.environ.get("ALERT_SEVERITY_LEVELS", "WARNING,ERROR,CRITICAL") # Cảnh báo cả WARNING
@@ -146,9 +141,19 @@ def scan_loki_for_suspicious_logs(start_time, end_time):
     levels_to_scan = log_levels_all[scan_level_index:]
 
     namespace_regex = "|".join(K8S_NAMESPACES)
-    level_filters = [f'|~ "(?i){level}"' for level in levels_to_scan]
-    keyword_filters = ['|= "(?i)fail"', '|= "(?i)error"', '|= "(?i)crash"', '|= "(?i)exception"', '|= "(?i)panic"']
-    logql_query = f'{{namespace=~"{namespace_regex}"}} ({ "|".join(level_filters + keyword_filters) })'
+    # --- BẮT ĐẦU THAY ĐỔI: Sửa lại LogQL query ---
+    # Tạo regex pattern: (?i)(WORD1|WORD2|...)
+    # Bao gồm các level log cần quét và các từ khóa lỗi phổ biến
+    keywords_to_find = levels_to_scan + ["fail", "crash", "exception", "panic", "fatal"] # Bỏ "error" vì nó thường trùng với level ERROR
+    # Escape các ký tự đặc biệt trong keywords nếu cần (ví dụ nếu có dấu ngoặc)
+    escaped_keywords = [re.escape(k) for k in keywords_to_find]
+    regex_pattern = "(?i)(" + "|".join(escaped_keywords) + ")"
+
+    # Query: Tìm log trong namespace khớp với regex pattern
+    # Sử dụng `|~` để lọc dòng log chứa các từ khóa/level
+    logql_query = f'{{namespace=~"{namespace_regex}"}} |~ `{regex_pattern}`'
+    # --- KẾT THÚC THAY ĐỔI ---
+
     query_limit_scan = 2000
 
     params = {
@@ -158,13 +163,13 @@ def scan_loki_for_suspicious_logs(start_time, end_time):
         'limit': query_limit_scan,
         'direction': 'forward'
     }
-    logging.info(f"Scanning Loki for suspicious logs (Level >= {LOKI_SCAN_MIN_LEVEL}): {logql_query[:200]}...")
+    logging.info(f"Scanning Loki for suspicious logs (Level >= {LOKI_SCAN_MIN_LEVEL} or keywords): {logql_query[:200]}...")
     suspicious_logs_by_pod = {}
 
     try:
         headers = {'Accept': 'application/json'}
         response = requests.get(loki_api_endpoint, params=params, headers=headers, timeout=60)
-        response.raise_for_status()
+        response.raise_for_status() # Sẽ ném lỗi nếu có 400 Bad Request
         data = response.json()
         if 'data' in data and 'result' in data['data']:
             count = 0
@@ -180,6 +185,13 @@ def scan_loki_for_suspicious_logs(start_time, end_time):
         else:
             logging.info("Loki scan found no suspicious log entries.")
         return suspicious_logs_by_pod
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 400:
+                error_detail = e.response.text[:500]
+                logging.error(f"Error scanning Loki (400 Bad Request): Invalid LogQL query? Query: '{logql_query}'. Loki Response: {error_detail}")
+        else:
+                logging.error(f"Error scanning Loki (HTTP Error {e.response.status_code}): {e}")
+        return {}
     except requests.exceptions.RequestException as e: logging.error(f"Error scanning Loki: {e}"); return {}
     except json.JSONDecodeError as e: logging.error(f"Error decoding Loki scan response: {e}"); return {}
     except Exception as e: logging.error(f"Unexpected error during Loki scan: {e}", exc_info=True); return {}
@@ -240,10 +252,8 @@ def preprocess_and_filter(log_entries):
     filtered_logs = []
     log_levels = ["DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"]
     min_level_index = -1
-    # --- THAY ĐỔI: Sử dụng LOKI_SCAN_MIN_LEVEL để lọc ---
     try: min_level_index = log_levels.index(LOKI_SCAN_MIN_LEVEL.upper())
     except ValueError: logging.warning(f"Invalid LOKI_SCAN_MIN_LEVEL: {LOKI_SCAN_MIN_LEVEL}. Defaulting to WARNING."); min_level_index = log_levels.index("WARNING")
-    # --- KẾT THÚC THAY ĐỔI ---
     keywords_indicating_problem = ["FAIL", "ERROR", "CRASH", "EXCEPTION", "UNAVAILABLE", "FATAL", "PANIC"]
     for entry in log_entries:
         log_line = entry['message']; log_line_upper = log_line.upper(); level_detected = False
@@ -347,9 +357,7 @@ def main_loop():
         # Thêm từ Loki scan
         for pod_key, logs in loki_suspicious_logs.items():
                 if pod_key not in pods_to_investigate: pods_to_investigate[pod_key] = {"reason": [], "logs": []}
-                # --- THAY ĐỔI: Sử dụng LOKI_SCAN_MIN_LEVEL trong lý do ---
                 pods_to_investigate[pod_key]["reason"].append(f"Loki: Phát hiện {len(logs)} log đáng ngờ (>= {LOKI_SCAN_MIN_LEVEL})")
-                # --- KẾT THÚC THAY ĐỔI ---
                 pods_to_investigate[pod_key]["logs"].extend(logs) # Thêm các log đáng ngờ đã tìm thấy
 
         logging.info(f"Total pods to investigate this cycle: {len(pods_to_investigate)}")
@@ -391,9 +399,7 @@ def main_loop():
                 log_start_time = log_end_time - timedelta(minutes=LOKI_DETAIL_LOG_RANGE_MINUTES)
                 detailed_logs = query_loki_for_pod(namespace, pod_name, log_start_time, log_end_time)
                 # Lọc log chi tiết này (ví dụ chỉ lấy INFO trở lên nếu MIN_LOG_LEVEL là INFO)
-                # --- THAY ĐỔI: Dùng preprocess_and_filter ở đây ---
                 logs_for_analysis = preprocess_and_filter(detailed_logs) # Áp dụng bộ lọc chung
-                # --- KẾT THÚC THAY ĐỔI ---
 
 
             # 7. Phân tích với Gemini
