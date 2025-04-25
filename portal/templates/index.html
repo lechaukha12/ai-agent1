@@ -7,13 +7,20 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        /* Thêm một chút style tùy chỉnh nếu cần */
         body { font-family: 'Inter', sans-serif; }
         .stat-card { transition: transform 0.2s ease-in-out; }
         .stat-card:hover { transform: translateY(-5px); }
         #loading-spinner { border-top-color: #3498db; }
-        /* Đảm bảo canvas có chiều cao */
-        #statsChartContainer { min-height: 300px; }
+        .chart-container { min-height: 300px; position: relative; }
+        /* === BỎ CSS line-clamp-2 === */
+        /* .line-clamp-2 { ... } */
+
+        /* Giữ nguyên CSS căn chỉnh cột */
+        #incidents-table th:nth-child(1), #incidents-table td:nth-child(1) { width: 15%; }
+        #incidents-table th:nth-child(2), #incidents-table td:nth-child(2) { width: 20%; }
+        #incidents-table th:nth-child(3), #incidents-table td:nth-child(3) { width: 10%; }
+        #incidents-table th:nth-child(4), #incidents-table td:nth-child(4) { width: 30%; }
+        #incidents-table th:nth-child(5), #incidents-table td:nth-child(5) { width: 25%; }
     </style>
      <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -32,10 +39,10 @@
 
 
         <section class="mb-8">
-            <h2 class="text-2xl font-semibold mb-4 text-gray-800">Tổng quan (7 ngày gần nhất)</h2>
+            <h2 class="text-2xl font-semibold mb-4 text-gray-800">Tổng quan Hôm Nay (<span id="today-date"></span>)</h2>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div class="stat-card bg-white p-6 rounded-lg shadow-md border border-gray-200">
-                    <h3 class="text-lg font-semibold text-red-600 mb-2">Tổng Sự Cố</h3>
+                    <h3 class="text-lg font-semibold text-red-600 mb-2">Sự Cố Hôm Nay</h3>
                     <p id="total-incidents" class="text-4xl font-bold text-red-500">--</p>
                 </div>
                 <div class="stat-card bg-white p-6 rounded-lg shadow-md border border-gray-200">
@@ -49,16 +56,31 @@
             </div>
         </section>
 
-        <section class="mb-8">
-            <h2 class="text-2xl font-semibold mb-4 text-gray-800">Thống kê hàng ngày (7 ngày gần nhất)</h2>
-            <div class="bg-white p-4 md:p-6 rounded-lg shadow-md border border-gray-200" id="statsChartContainer">
-                 <canvas id="statsChart"></canvas>
-                 <p id="chart-error" class="text-center text-red-500 hidden mt-4">Lỗi tải dữ liệu biểu đồ.</p>
-                 <p id="chart-no-data" class="text-center text-gray-500 hidden mt-4">Chưa có đủ dữ liệu thống kê hàng ngày để vẽ biểu đồ.</p>
+        <section class="mb-8 grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div>
+                <h2 class="text-2xl font-semibold mb-4 text-gray-800">Xu hướng hàng ngày (7 ngày)</h2>
+                <div class="bg-white p-4 md:p-6 rounded-lg shadow-md border border-gray-200 chart-container" id="statsChartContainer">
+                     <canvas id="statsChart"></canvas>
+                     <p id="line-chart-error" class="text-center text-red-500 hidden mt-4">Lỗi tải dữ liệu biểu đồ đường.</p>
+                     <p id="line-chart-no-data" class="text-center text-gray-500 hidden mt-4">Chưa có đủ dữ liệu thống kê hàng ngày để vẽ biểu đồ đường.</p>
+                </div>
+            </div>
+             <div>
+                <h2 class="text-2xl font-semibold mb-4 text-gray-800">Phân loại Sự cố (Hôm nay)</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="bg-white p-4 rounded-lg shadow-md border border-gray-200 chart-container" id="severityPieChartContainer">
+                         <canvas id="severityPieChart"></canvas>
+                         <p id="severity-pie-error" class="absolute inset-0 flex items-center justify-center text-center text-red-500 hidden p-4">Lỗi tải dữ liệu.</p>
+                         <p id="severity-pie-no-data" class="absolute inset-0 flex items-center justify-center text-center text-gray-500 hidden p-4">Không có sự cố hôm nay.</p>
+                    </div>
+                     <div class="bg-white p-4 rounded-lg shadow-md border border-gray-200 chart-container" id="sourcePieChartContainer">
+                         <canvas id="sourcePieChart"></canvas>
+                          <p id="source-pie-error" class="absolute inset-0 flex items-center justify-center text-center text-red-500 hidden p-4">Lỗi tải dữ liệu.</p>
+                         <p id="source-pie-no-data" class="absolute inset-0 flex items-center justify-center text-center text-gray-500 hidden p-4">Không có sự cố hôm nay.</p>
+                    </div>
+                </div>
             </div>
         </section>
-
-
         <section>
             <div class="flex justify-between items-center mb-4">
                  <h2 class="text-2xl font-semibold text-gray-800">Sự cố gần đây (Tối đa 100)</h2>
@@ -67,7 +89,7 @@
                  </button>
             </div>
             <div class="bg-white rounded-lg shadow-md overflow-x-auto border border-gray-200">
-                <table class="min-w-full divide-y divide-gray-200">
+                <table id="incidents-table" class="min-w-full divide-y divide-gray-200 table-fixed">
                     <thead class="bg-gray-50">
                         <tr>
                             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Thời gian</th>
@@ -87,155 +109,222 @@
     </div>
 
     <script>
+        // === Biến DOM (Giữ nguyên) ===
         const incidentsTableBody = document.getElementById('incidents-table-body');
         const totalIncidentsElem = document.getElementById('total-incidents');
         const totalGeminiCallsElem = document.getElementById('total-gemini-calls');
         const totalTelegramAlertsElem = document.getElementById('total-telegram-alerts');
+        const todayDateElem = document.getElementById('today-date');
         const refreshButton = document.getElementById('refresh-button');
         const loadingSpinner = document.getElementById('loading-spinner');
         const loadingOverlay = document.getElementById('loading-overlay');
-        const chartCtx = document.getElementById('statsChart').getContext('2d');
-        const chartErrorElem = document.getElementById('chart-error');
-        const chartNoDataElem = document.getElementById('chart-no-data');
-        let statsChartInstance = null;
+        const lineChartCtx = document.getElementById('statsChart').getContext('2d');
+        const lineChartErrorElem = document.getElementById('line-chart-error');
+        const lineChartNoDataElem = document.getElementById('line-chart-no-data');
+        let lineChartInstance = null;
+        const severityPieCtx = document.getElementById('severityPieChart').getContext('2d');
+        const severityPieErrorElem = document.getElementById('severity-pie-error');
+        const severityPieNoDataElem = document.getElementById('severity-pie-no-data');
+        let severityPieInstance = null;
+        const sourcePieCtx = document.getElementById('sourcePieChart').getContext('2d');
+        const sourcePieErrorElem = document.getElementById('source-pie-error');
+        const sourcePieNoDataElem = document.getElementById('source-pie-no-data');
+        let sourcePieInstance = null;
 
-        function showLoading() {
-            loadingSpinner.classList.remove('hidden');
-            loadingOverlay.classList.remove('hidden');
+        // === Hàm tiện ích (Giữ nguyên) ===
+        function showLoading() { loadingSpinner.classList.remove('hidden'); loadingOverlay.classList.remove('hidden'); }
+        function hideLoading() { loadingSpinner.classList.add('hidden'); loadingOverlay.classList.add('hidden'); }
+        function formatVietnameseDateTime(inputString) { /* ... Giữ nguyên hàm đã sửa v3 ... */
+            if (!inputString) return 'N/A';
+            try {
+                const dateObj = new Date(inputString);
+                if (isNaN(dateObj.getTime())) { throw new Error(`Invalid date parsed from: ${inputString}`); }
+                const day = String(dateObj.getDate()).padStart(2, '0');
+                const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                const year = dateObj.getFullYear();
+                const hours = String(dateObj.getHours()).padStart(2, '0');
+                const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+                const seconds = String(dateObj.getSeconds()).padStart(2, '0');
+                return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+            } catch (e) { console.error("Error formatting date:", inputString, e); return 'Lỗi định dạng'; }
+         }
+        function setTodayDate() { /* ... Giữ nguyên ... */
+             const today = new Date();
+             const day = String(today.getDate()).padStart(2, '0');
+             const month = String(today.getMonth() + 1).padStart(2, '0');
+             const year = today.getFullYear();
+             todayDateElem.textContent = `${day}/${month}/${year}`;
         }
 
-        function hideLoading() {
-            loadingSpinner.classList.add('hidden');
-            loadingOverlay.classList.add('hidden');
-        }
-
-        function renderStatsChart(dailyStats) {
-             chartErrorElem.classList.add('hidden');
-             chartNoDataElem.classList.add('hidden');
-
-             if (!dailyStats || dailyStats.length < 2) {
-                 console.warn("Không đủ dữ liệu hàng ngày để vẽ biểu đồ.");
-                 chartNoDataElem.classList.remove('hidden');
-                 if (statsChartInstance) { statsChartInstance.destroy(); statsChartInstance = null; }
-                 return;
-             }
-
+        // === Hàm vẽ biểu đồ (Giữ nguyên) ===
+        function renderLineChart(dailyStats) { /* ... */
+             lineChartErrorElem.classList.add('hidden'); lineChartNoDataElem.classList.add('hidden');
+             if (!dailyStats || dailyStats.length < 1) { console.warn("Không đủ dữ liệu hàng ngày để vẽ biểu đồ đường."); lineChartNoDataElem.classList.remove('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; } return; }
              dailyStats.sort((a, b) => new Date(a.date) - new Date(b.date));
-
              const labels = dailyStats.map(stat => stat.date);
              const incidentData = dailyStats.map(stat => stat.incident_count);
              const geminiData = dailyStats.map(stat => stat.gemini_calls);
              const telegramData = dailyStats.map(stat => stat.telegram_alerts);
-
-             const chartData = {
-                 labels: labels,
-                 datasets: [
-                     { label: 'Sự Cố', data: incidentData, borderColor: 'rgb(239, 68, 68)', backgroundColor: 'rgba(239, 68, 68, 0.1)', tension: 0.1, fill: true, },
-                     { label: 'Gọi Gemini', data: geminiData, borderColor: 'rgb(59, 130, 246)', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.1, fill: true, },
-                     { label: 'Cảnh báo Telegram', data: telegramData, borderColor: 'rgb(34, 197, 94)', backgroundColor: 'rgba(34, 197, 94, 0.1)', tension: 0.1, fill: true, }
-                 ]
-             };
-
-             const chartConfig = {
-                 type: 'line', data: chartData,
-                 options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }, plugins: { legend: { position: 'top', }, tooltip: { mode: 'index', intersect: false, } } }
-             };
-
-             if (statsChartInstance) { statsChartInstance.destroy(); }
-             statsChartInstance = new Chart(chartCtx, chartConfig);
+             const chartData = { labels: labels, datasets: [ { label: 'Sự Cố', data: incidentData, borderColor: 'rgb(239, 68, 68)', backgroundColor: 'rgba(239, 68, 68, 0.1)', tension: 0.1, fill: true, }, { label: 'Gọi Gemini', data: geminiData, borderColor: 'rgb(59, 130, 246)', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.1, fill: true, }, { label: 'Cảnh báo Telegram', data: telegramData, borderColor: 'rgb(34, 197, 94)', backgroundColor: 'rgba(34, 197, 94, 0.1)', tension: 0.1, fill: true, } ] };
+             const chartConfig = { type: 'line', data: chartData, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }, plugins: { legend: { position: 'top', }, tooltip: { mode: 'index', intersect: false, } } } };
+             if (lineChartInstance) { lineChartInstance.destroy(); }
+             lineChartInstance = new Chart(lineChartCtx, chartConfig);
         }
+        function renderPieChart(ctx, errorElem, noDataElem, chartInstance, chartData, title) { /* ... */
+            errorElem.classList.add('hidden'); noDataElem.classList.add('hidden');
+            const labels = Object.keys(chartData); const data = Object.values(chartData);
+            const total = data.reduce((sum, value) => sum + value, 0);
+            if (labels.length === 0 || total === 0) { console.warn(`Không có dữ liệu cho biểu đồ tròn: ${title}`); noDataElem.classList.remove('hidden'); if (chartInstance) { chartInstance.destroy(); chartInstance = null; } return null; }
+             const backgroundColors = [ 'rgba(239, 68, 68, 0.7)', 'rgba(245, 158, 11, 0.7)', 'rgba(59, 130, 246, 0.7)', 'rgba(34, 197, 94, 0.7)', 'rgba(107, 114, 128, 0.7)', 'rgba(168, 85, 247, 0.7)', 'rgba(236, 72, 153, 0.7)' ];
+             const hoverBackgroundColors = [ 'rgba(220, 38, 38, 0.9)', 'rgba(217, 119, 6, 0.9)', 'rgba(37, 99, 235, 0.9)', 'rgba(22, 163, 74, 0.9)', 'rgba(75, 85, 99, 0.9)', 'rgba(147, 51, 234, 0.9)', 'rgba(219, 39, 119, 0.9)' ];
+             const pieChartData = { labels: labels, datasets: [{ label: title, data: data, backgroundColor: backgroundColors.slice(0, labels.length), hoverBackgroundColor: hoverBackgroundColors.slice(0, labels.length), hoverOffset: 4 }] };
+             const pieChartConfig = { type: 'pie', data: pieChartData, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', }, title: { display: true, text: title, font: { size: 16 } }, tooltip: { callbacks: { label: function(context) { let label = context.label || ''; if (label) { label += ': '; } if (context.parsed !== null) { const total = context.chart.data.datasets[0].data.reduce((sum, value) => sum + value, 0); const percentage = total > 0 ? ((context.parsed / total) * 100).toFixed(1) + '%' : '0%'; label += `${context.parsed} (${percentage})`; } return label; } } } } } };
+             if (chartInstance) { chartInstance.destroy(); }
+             return new Chart(ctx, pieChartConfig);
+         }
 
-
-        async function fetchStats() {
+        // === Hàm Fetch dữ liệu (Giữ nguyên) ===
+        async function fetchStats() { /* ... */
             try {
-                const response = await fetch('/api/stats?days=7');
+                const response = await fetch('/api/stats?days=1');
                 if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
                 const stats = await response.json();
-                if (stats.error) {
-                    console.error("Error fetching stats:", stats.error);
-                    totalIncidentsElem.textContent = 'Lỗi'; totalGeminiCallsElem.textContent = 'Lỗi'; totalTelegramAlertsElem.textContent = 'Lỗi';
-                    chartErrorElem.classList.remove('hidden'); chartNoDataElem.classList.add('hidden');
-                    if (statsChartInstance) { statsChartInstance.destroy(); statsChartInstance = null; }
-                    return;
-                }
-                totalIncidentsElem.textContent = stats.total_incidents ?? '--';
-                totalGeminiCallsElem.textContent = stats.total_gemini_calls ?? '--';
-                totalTelegramAlertsElem.textContent = stats.total_telegram_alerts ?? '--';
-                renderStatsChart(stats.daily_stats);
-            } catch (error) {
-                console.error('Error fetching stats:', error);
-                totalIncidentsElem.textContent = 'Lỗi'; totalGeminiCallsElem.textContent = 'Lỗi'; totalTelegramAlertsElem.textContent = 'Lỗi';
-                chartErrorElem.classList.remove('hidden'); chartNoDataElem.classList.add('hidden');
-                if (statsChartInstance) { statsChartInstance.destroy(); statsChartInstance = null; }
-            }
+                if (stats.error) { console.error("Error fetching stats:", stats.error); totalIncidentsElem.textContent = 'Lỗi'; totalGeminiCallsElem.textContent = 'Lỗi'; totalTelegramAlertsElem.textContent = 'Lỗi'; lineChartErrorElem.classList.remove('hidden'); lineChartNoDataElem.classList.add('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; } return; }
+                const todayStr = new Date().toISOString().split('T')[0];
+                const todayStats = stats.daily_stats.find(d => d.date === todayStr);
+                if (todayStats) { totalIncidentsElem.textContent = todayStats.incident_count ?? '0'; totalGeminiCallsElem.textContent = todayStats.gemini_calls ?? '0'; totalTelegramAlertsElem.textContent = todayStats.telegram_alerts ?? '0'; }
+                else { totalIncidentsElem.textContent = '0'; totalGeminiCallsElem.textContent = '0'; totalTelegramAlertsElem.textContent = '0'; }
+                const response7days = await fetch('/api/stats?days=7');
+                const stats7days = await response7days.json();
+                if (!stats7days.error) { renderLineChart(stats7days.daily_stats); }
+                else { renderLineChart([]); }
+            } catch (error) { console.error('Error fetching stats:', error); totalIncidentsElem.textContent = 'Lỗi'; totalGeminiCallsElem.textContent = 'Lỗi'; totalTelegramAlertsElem.textContent = 'Lỗi'; lineChartErrorElem.classList.remove('hidden'); lineChartNoDataElem.classList.add('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; } }
         }
 
+        // === BẮT ĐẦU XÂY LẠI: Hàm fetchIncidents ===
         async function fetchIncidents() {
             showLoading();
+            severityPieErrorElem.classList.add('hidden'); sourcePieErrorElem.classList.add('hidden');
+            severityPieNoDataElem.classList.add('hidden'); sourcePieNoDataElem.classList.add('hidden');
+            incidentsTableBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-gray-500">Đang tải dữ liệu...</td></tr>';
+
             try {
                 const response = await fetch('/api/incidents?limit=100');
-                if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
-                const incidents = await response.json();
-                if (incidents.error) {
-                     console.error("Error fetching incidents:", incidents.error);
-                     incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-red-500">Lỗi tải dữ liệu sự cố: ${incidents.error}</td></tr>`;
-                     return;
+                if (!response.ok) {
+                    let errorMsg = `HTTP error! status: ${response.status}`;
+                    try { const errorData = await response.json(); errorMsg = errorData.error || errorMsg; } catch (e) {}
+                    throw new Error(errorMsg);
                 }
+                const incidents = await response.json();
+                if (incidents.error) { throw new Error(`API Error: ${incidents.error}`); }
+
                 incidentsTableBody.innerHTML = '';
+
+                const severityCounts = { 'WARNING': 0, 'ERROR': 0, 'CRITICAL': 0, 'INFO': 0, 'Khác': 0 };
+                const sourceCounts = { 'Hạ tầng (K8s)': 0, 'Ứng dụng (Loki)': 0, 'Cả hai': 0 };
+                const today = new Date();
+                const todayLocalStr = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString().split('T')[0];
+
+
                 if (incidents.length === 0) {
                     incidentsTableBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-gray-500">Chưa có sự cố nào được ghi nhận.</td></tr>';
+                    severityPieNoDataElem.classList.remove('hidden'); sourcePieNoDataElem.classList.remove('hidden');
+                    if(severityPieInstance) { severityPieInstance.destroy(); severityPieInstance = null; }
+                    if(sourcePieInstance) { sourcePieInstance.destroy(); sourcePieInstance = null; }
                 } else {
                     incidents.forEach(incident => {
-                        const row = document.createElement('tr');
-                        // === BẮT ĐẦU SỬA LỖI ===
-                        // Chỉ thêm class nếu severity là WARNING, ERROR, hoặc CRITICAL
-                        const severity = incident.severity ? incident.severity.toUpperCase() : ''; // Lấy severity và chuyển thành chữ hoa, hoặc chuỗi rỗng nếu null/undefined
-                        if (severity === 'ERROR' || severity === 'CRITICAL') {
-                            row.classList.add('bg-red-50');
-                        } else if (severity === 'WARNING') {
-                            row.classList.add('bg-yellow-50');
-                        }
-                        // === KẾT THÚC SỬA LỖI ===
+                        // --- Xử lý Pie Chart Data ---
+                        let incidentDateLocalStr = '';
+                        try {
+                            const dateObj = new Date(incident.timestamp);
+                            if (!isNaN(dateObj.getTime())) {
+                                 incidentDateLocalStr = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()).toISOString().split('T')[0];
+                            }
+                        } catch(e) { console.error("Error processing timestamp for pie chart:", incident.timestamp, e); }
 
-                        const createCell = (text) => {
+                        if (incidentDateLocalStr === todayLocalStr) {
+                             const severity = incident.severity ? incident.severity.toUpperCase() : 'Khác';
+                             if (severityCounts.hasOwnProperty(severity)) { severityCounts[severity]++; } else { severityCounts['Khác']++; }
+                             const reasons = incident.initial_reasons || '';
+                             const isK8s = reasons.includes('K8s:'); const isLoki = reasons.includes('Loki:');
+                             if (isK8s && isLoki) { sourceCounts['Cả hai']++; } else if (isK8s) { sourceCounts['Hạ tầng (K8s)']++; } else if (isLoki) { sourceCounts['Ứng dụng (Loki)']++; }
+                        }
+
+                        // --- Tạo hàng cho bảng ---
+                        const row = document.createElement('tr');
+                        const severityUpper = incident.severity ? incident.severity.toUpperCase() : '';
+                        if (severityUpper === 'ERROR' || severityUpper === 'CRITICAL') { row.classList.add('bg-red-50'); }
+                        else if (severityUpper === 'WARNING') { row.classList.add('bg-yellow-50'); }
+
+                        // === BẮT ĐẦU SỬA LỖI: Hàm tạo cell v5 ===
+                        const createCell = (text, allowWrap = false) => { // Đổi tên tham số thành allowWrap
                             const cell = document.createElement('td');
-                            cell.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-700';
-                            cell.textContent = text ?? 'N/A';
-                            return cell;
-                        };
-                        const createSeverityCell = (text) => {
-                            const cell = createCell(text);
-                            const upperText = text ? text.toUpperCase() : '';
-                            if (upperText === 'ERROR' || upperText === 'CRITICAL') {
-                                cell.classList.add('font-semibold', 'text-red-600');
-                            } else if (upperText === 'WARNING') {
-                                cell.classList.add('font-semibold', 'text-yellow-600');
+                            cell.className = 'px-6 py-4 text-sm text-gray-700 align-top'; // Luôn align top
+
+                            // Xử lý giá trị null/undefined thành 'N/A'
+                            const displayValue = (text === null || text === undefined) ? 'N/A' : String(text);
+
+                            // Gán title là nội dung đầy đủ đã xử lý (cho tooltip trình duyệt)
+                            cell.title = displayValue;
+                            // Gán textContent
+                            cell.textContent = displayValue;
+
+                            // Thêm class để cho phép xuống dòng nếu cần
+                            if (allowWrap) {
+                                cell.classList.add('whitespace-normal'); // Cho phép xuống dòng tự nhiên
                             } else {
-                                 cell.classList.add('text-gray-500');
+                                cell.classList.add('whitespace-nowrap'); // Giữ không xuống dòng
                             }
                             return cell;
                         };
-                        row.appendChild(createCell(incident.timestamp));
-                        row.appendChild(createCell(incident.pod_key));
-                        row.appendChild(createSeverityCell(incident.severity));
-                        row.appendChild(createCell(incident.summary));
-                        row.appendChild(createCell(incident.initial_reasons));
+                        // === KẾT THÚC SỬA LỖI ===
+
+                        const createSeverityCell = (text) => {
+                            const cell = createCell(text); const upperText = text ? text.toUpperCase() : '';
+                            if (upperText === 'ERROR' || upperText === 'CRITICAL') { cell.classList.add('font-semibold', 'text-red-600'); }
+                            else if (upperText === 'WARNING') { cell.classList.add('font-semibold', 'text-yellow-600'); }
+                            else { cell.classList.add('text-gray-500'); } return cell;
+                        };
+
+                        // Thêm các cell vào row
+                        row.appendChild(createCell(formatVietnameseDateTime(incident.timestamp))); // Không wrap
+                        row.appendChild(createCell(incident.pod_key)); // Không wrap
+                        row.appendChild(createSeverityCell(incident.severity)); // Không wrap
+                        row.appendChild(createCell(incident.summary, true)); // Cho phép wrap
+                        row.appendChild(createCell(incident.initial_reasons, true)); // Cho phép wrap
                         incidentsTableBody.appendChild(row);
                     });
+
+                    // Vẽ Pie Charts
+                    const finalSeverityCounts = Object.fromEntries(Object.entries(severityCounts).filter(([_, v]) => v > 0));
+                    const finalSourceCounts = Object.fromEntries(Object.entries(sourceCounts).filter(([_, v]) => v > 0));
+                    severityPieInstance = renderPieChart(severityPieCtx, severityPieErrorElem, severityPieNoDataElem, severityPieInstance, finalSeverityCounts, 'Phân loại theo Mức độ');
+                    sourcePieInstance = renderPieChart(sourcePieCtx, sourcePieErrorElem, sourcePieNoDataElem, sourcePieInstance, finalSourceCounts, 'Phân loại theo Nguồn gốc');
                 }
+
             } catch (error) {
-                console.error('Error fetching incidents:', error);
-                incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-red-500">Lỗi khi tải dữ liệu sự cố. Vui lòng kiểm tra console.</td></tr>`;
+                console.error('Lỗi trong quá trình fetch và xử lý sự cố:', error);
+                incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-red-500">Đã xảy ra lỗi khi tải dữ liệu sự cố: ${error.message}. Vui lòng thử lại hoặc kiểm tra console.</td></tr>`;
+                severityPieErrorElem.textContent = `Lỗi: ${error.message}`; sourcePieErrorElem.textContent = `Lỗi: ${error.message}`;
+                severityPieErrorElem.classList.remove('hidden'); sourcePieErrorElem.classList.remove('hidden');
+                severityPieNoDataElem.classList.add('hidden'); sourcePieNoDataElem.classList.add('hidden');
+                if(severityPieInstance) { severityPieInstance.destroy(); severityPieInstance = null; }
+                if(sourcePieInstance) { sourcePieInstance.destroy(); sourcePieInstance = null; }
             } finally {
                  hideLoading();
             }
         }
+         // === KẾT THÚC XÂY LẠI ===
 
+
+        // Load dữ liệu lần đầu
         document.addEventListener('DOMContentLoaded', () => {
+            setTodayDate();
             fetchStats();
             fetchIncidents();
         });
 
+        // Refresh
         refreshButton.addEventListener('click', () => {
              fetchStats();
              fetchIncidents();
