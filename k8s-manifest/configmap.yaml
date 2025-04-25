@@ -4,13 +4,17 @@ metadata:
   name: k8s-log-agent-config
   namespace: kube-observability
 data:
-  # Sửa dòng này: Bỏ dấu nháy kép bao quanh
-  ALERT_SEVERITY_LEVELS: WARNING,ERROR,CRITICAL
-  GEMINI_MODEL_NAME: gemini-1.5-flash
-  K8S_NAMESPACES: kube-system,app-infra,alfinac-bee-logistics
-  LOKI_QUERY_LIMIT: '1000'
-  LOKI_QUERY_RANGE_MINUTES: '5'
-  LOKI_URL: http://loki-loki-distributed-query-frontend:3100
-  # Đảm bảo dòng này đúng
-  MIN_LOG_LEVEL_FOR_GEMINI: WARNING
-  QUERY_INTERVAL_SECONDS: '30'
+  LOKI_URL: "http://loki-loki-distributed-query-frontend:3100" # !!! THAY THẾ BẰNG URL LOKI CỦA BẠN !!!
+  # Bao lâu quét K8s/Loki 1 lần (giây)
+  SCAN_INTERVAL_SECONDS: "30" # <<< Đã sửa thành 30 giây
+  # Khoảng thời gian quét log Loki tìm vấn đề (phút)
+  LOKI_SCAN_RANGE_MINUTES: "1"
+  # Khoảng thời gian lấy log chi tiết cho pod có vấn đề (phút)
+  LOKI_DETAIL_LOG_RANGE_MINUTES: "30"
+  LOKI_QUERY_LIMIT: "500" # Giới hạn log cho mỗi pod query
+  K8S_NAMESPACES: "kube-system,app-infra,alfinac-bee-logistics"
+  # Mức log tối thiểu để Loki scan tìm vấn đề (WARNING, ERROR, ...)
+  LOKI_SCAN_MIN_LEVEL: "WARNING"
+  ALERT_SEVERITY_LEVELS: "WARNING,ERROR,CRITICAL" # Cảnh báo cả WARNING
+  RESTART_COUNT_THRESHOLD: "5" # Số lần restart để coi là bất thường
+  GEMINI_MODEL_NAME: "gemini-1.5-flash"
