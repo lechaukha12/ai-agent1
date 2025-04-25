@@ -12,18 +12,12 @@
         .stat-card:hover { transform: translateY(-5px); }
         #loading-spinner { border-top-color: #3498db; }
         .chart-container { min-height: 300px; position: relative; }
-        .line-clamp-2 {
-            overflow: hidden;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            word-break: break-word;
-        }
-        #incidents-table th:nth-child(1), #incidents-table td:nth-child(1) { width: 15%; }
-        #incidents-table th:nth-child(2), #incidents-table td:nth-child(2) { width: 20%; }
-        #incidents-table th:nth-child(3), #incidents-table td:nth-child(3) { width: 10%; }
-        #incidents-table th:nth-child(4), #incidents-table td:nth-child(4) { width: 30%; }
-        #incidents-table th:nth-child(5), #incidents-table td:nth-child(5) { width: 25%; }
+        /* Bỏ style cũ */
+        /* Căn chỉnh chiều rộng cột mới (4 cột) */
+        #incidents-table th:nth-child(1), #incidents-table td:nth-child(1) { width: 25%; } /* Pod */
+        #incidents-table th:nth-child(2), #incidents-table td:nth-child(2) { width: 15%; } /* Mức độ */
+        #incidents-table th:nth-child(3), #incidents-table td:nth-child(3) { width: 30%; } /* Tóm tắt */
+        #incidents-table th:nth-child(4), #incidents-table td:nth-child(4) { width: 30%; } /* Lý do */
     </style>
      <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -59,28 +53,13 @@
             </div>
         </section>
 
-        <section class="mb-8 grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div>
+        <section class="mb-8">
+             <div>
                 <h2 class="text-2xl font-semibold mb-4 text-gray-800">Xu hướng hàng ngày (7 ngày)</h2>
                 <div class="bg-white p-4 md:p-6 rounded-lg shadow-md border border-gray-200 chart-container" id="statsChartContainer">
                      <canvas id="statsChart"></canvas>
                      <p id="line-chart-error" class="text-center text-red-500 hidden mt-4">Lỗi tải dữ liệu biểu đồ đường.</p>
                      <p id="line-chart-no-data" class="text-center text-gray-500 hidden mt-4">Chưa có đủ dữ liệu thống kê hàng ngày để vẽ biểu đồ đường.</p>
-                </div>
-            </div>
-             <div>
-                <h2 class="text-2xl font-semibold mb-4 text-gray-800">Phân loại Sự cố (Hôm nay)</h2>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div class="bg-white p-4 rounded-lg shadow-md border border-gray-200 chart-container" id="severityPieChartContainer">
-                         <canvas id="severityPieChart"></canvas>
-                         <p id="severity-pie-error" class="absolute inset-0 flex items-center justify-center text-center text-red-500 hidden p-4">Lỗi tải dữ liệu.</p>
-                         <p id="severity-pie-no-data" class="absolute inset-0 flex items-center justify-center text-center text-gray-500 hidden p-4">Không có sự cố hôm nay.</p>
-                    </div>
-                     <div class="bg-white p-4 rounded-lg shadow-md border border-gray-200 chart-container" id="sourcePieChartContainer">
-                         <canvas id="sourcePieChart"></canvas>
-                          <p id="source-pie-error" class="absolute inset-0 flex items-center justify-center text-center text-red-500 hidden p-4">Lỗi tải dữ liệu.</p>
-                         <p id="source-pie-no-data" class="absolute inset-0 flex items-center justify-center text-center text-gray-500 hidden p-4">Không có sự cố hôm nay.</p>
-                    </div>
                 </div>
             </div>
         </section>
@@ -95,16 +74,15 @@
                 <table id="incidents-table" class="min-w-full divide-y divide-gray-200 table-fixed">
                     <thead class="bg-gray-50">
                         <tr>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Thời gian</th>
                             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pod</th>
                             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Mức độ</th>
                             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tóm tắt</th>
                             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lý do phát hiện</th>
-                        </tr>
+                            </tr>
                     </thead>
                     <tbody id="incidents-table-body" class="bg-white divide-y divide-gray-200">
-                        <tr><td colspan="5" class="text-center py-4 text-gray-500">Đang tải dữ liệu...</td></tr>
-                    </tbody>
+                        <tr><td colspan="4" class="text-center py-4 text-gray-500">Đang tải dữ liệu...</td></tr>
+                        </tbody>
                 </table>
             </div>
         </section>
@@ -112,7 +90,7 @@
     </div>
 
     <script>
-        // === Biến DOM (Giữ nguyên) ===
+        // === Biến DOM ===
         const incidentsTableBody = document.getElementById('incidents-table-body');
         const totalIncidentsElem = document.getElementById('total-incidents');
         const totalGeminiCallsElem = document.getElementById('total-gemini-calls');
@@ -125,46 +103,17 @@
         const lineChartErrorElem = document.getElementById('line-chart-error');
         const lineChartNoDataElem = document.getElementById('line-chart-no-data');
         let lineChartInstance = null;
-        const severityPieCtx = document.getElementById('severityPieChart').getContext('2d');
-        const severityPieErrorElem = document.getElementById('severity-pie-error');
-        const severityPieNoDataElem = document.getElementById('severity-pie-no-data');
-        let severityPieInstance = null;
-        const sourcePieCtx = document.getElementById('sourcePieChart').getContext('2d');
-        const sourcePieErrorElem = document.getElementById('source-pie-error');
-        const sourcePieNoDataElem = document.getElementById('source-pie-no-data');
-        let sourcePieInstance = null;
+        // === THAY ĐỔI: Bỏ biến Pie Chart ===
+        // const severityPieCtx = ...
+        // const sourcePieCtx = ...
+        // === KẾT THÚC THAY ĐỔI ===
 
         // === Hàm tiện ích ===
         function showLoading() { loadingSpinner.classList.remove('hidden'); loadingOverlay.classList.remove('hidden'); }
         function hideLoading() { loadingSpinner.classList.add('hidden'); loadingOverlay.classList.add('hidden'); }
-
-        // === BẮT ĐẦU SỬA LỖI: Hàm format ngày giờ v4 ===
-        function formatVietnameseDateTime(inputString) {
-            if (!inputString) return 'N/A';
-            try {
-                // Giả định inputString là ISO 8601 UTC từ DB
-                const dateObj = new Date(inputString);
-                if (isNaN(dateObj.getTime())) {
-                    // Nếu không phải ISO, log lỗi và trả về chuỗi gốc hoặc lỗi
-                    console.error("Invalid date format received:", inputString);
-                    return 'Lỗi định dạng';
-                }
-
-                // Định dạng theo DD/MM/YYYY HH:MM:SS (giờ địa phương của trình duyệt)
-                const day = String(dateObj.getDate()).padStart(2, '0');
-                const month = String(dateObj.getMonth() + 1).padStart(2, '0'); // Tháng bắt đầu từ 0
-                const year = dateObj.getFullYear();
-                const hours = String(dateObj.getHours()).padStart(2, '0');
-                const minutes = String(dateObj.getMinutes()).padStart(2, '0');
-                const seconds = String(dateObj.getSeconds()).padStart(2, '0');
-                return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
-            } catch (e) {
-                console.error("Error formatting date:", inputString, e);
-                return 'Lỗi định dạng';
-            }
-        }
-        // === KẾT THÚC SỬA LỖI ===
-
+        // === THAY ĐỔI: Bỏ hàm format ngày giờ vì không dùng nữa ===
+        // function formatVietnameseDateTime(isoString) { ... }
+        // === KẾT THÚC THAY ĐỔI ===
         function setTodayDate() { /* ... Giữ nguyên ... */
              const today = new Date();
              const day = String(today.getDate()).padStart(2, '0');
@@ -173,8 +122,8 @@
              todayDateElem.textContent = `${day}/${month}/${year}`;
         }
 
-        // === Hàm vẽ biểu đồ (Giữ nguyên) ===
-        function renderLineChart(dailyStats) { /* ... */
+        // === Hàm vẽ biểu đồ (Giữ nguyên Line Chart, bỏ Pie Chart) ===
+        function renderLineChart(dailyStats) { /* ... Giữ nguyên ... */
              lineChartErrorElem.classList.add('hidden'); lineChartNoDataElem.classList.add('hidden');
              if (!dailyStats || dailyStats.length < 1) { console.warn("Không đủ dữ liệu hàng ngày để vẽ biểu đồ đường."); lineChartNoDataElem.classList.remove('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; } return; }
              dailyStats.sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -187,21 +136,12 @@
              if (lineChartInstance) { lineChartInstance.destroy(); }
              lineChartInstance = new Chart(lineChartCtx, chartConfig);
         }
-        function renderPieChart(ctx, errorElem, noDataElem, chartInstance, chartData, title) { /* ... */
-            errorElem.classList.add('hidden'); noDataElem.classList.add('hidden');
-            const labels = Object.keys(chartData); const data = Object.values(chartData);
-            const total = data.reduce((sum, value) => sum + value, 0);
-            if (labels.length === 0 || total === 0) { console.warn(`Không có dữ liệu cho biểu đồ tròn: ${title}`); noDataElem.classList.remove('hidden'); if (chartInstance) { chartInstance.destroy(); chartInstance = null; } return null; }
-             const backgroundColors = [ 'rgba(239, 68, 68, 0.7)', 'rgba(245, 158, 11, 0.7)', 'rgba(59, 130, 246, 0.7)', 'rgba(34, 197, 94, 0.7)', 'rgba(107, 114, 128, 0.7)', 'rgba(168, 85, 247, 0.7)', 'rgba(236, 72, 153, 0.7)' ];
-             const hoverBackgroundColors = [ 'rgba(220, 38, 38, 0.9)', 'rgba(217, 119, 6, 0.9)', 'rgba(37, 99, 235, 0.9)', 'rgba(22, 163, 74, 0.9)', 'rgba(75, 85, 99, 0.9)', 'rgba(147, 51, 234, 0.9)', 'rgba(219, 39, 119, 0.9)' ];
-             const pieChartData = { labels: labels, datasets: [{ label: title, data: data, backgroundColor: backgroundColors.slice(0, labels.length), hoverBackgroundColor: hoverBackgroundColors.slice(0, labels.length), hoverOffset: 4 }] };
-             const pieChartConfig = { type: 'pie', data: pieChartData, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', }, title: { display: true, text: title, font: { size: 16 } }, tooltip: { callbacks: { label: function(context) { let label = context.label || ''; if (label) { label += ': '; } if (context.parsed !== null) { const total = context.chart.data.datasets[0].data.reduce((sum, value) => sum + value, 0); const percentage = total > 0 ? ((context.parsed / total) * 100).toFixed(1) + '%' : '0%'; label += `${context.parsed} (${percentage})`; } return label; } } } } } };
-             if (chartInstance) { chartInstance.destroy(); }
-             return new Chart(ctx, pieChartConfig);
-         }
+        // === THAY ĐỔI: Bỏ hàm renderPieChart ===
+        // function renderPieChart(...) { ... }
+        // === KẾT THÚC THAY ĐỔI ===
 
-        // === Hàm Fetch dữ liệu (Giữ nguyên) ===
-        async function fetchStats() { /* ... */
+        // === Hàm Fetch dữ liệu (Giữ nguyên fetchStats) ===
+        async function fetchStats() { /* ... Giữ nguyên ... */
             try {
                 const response = await fetch('/api/stats?days=1');
                 if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
@@ -218,12 +158,11 @@
             } catch (error) { console.error('Error fetching stats:', error); totalIncidentsElem.textContent = 'Lỗi'; totalGeminiCallsElem.textContent = 'Lỗi'; totalTelegramAlertsElem.textContent = 'Lỗi'; lineChartErrorElem.classList.remove('hidden'); lineChartNoDataElem.classList.add('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; } }
         }
 
-        // === BẮT ĐẦU XÂY LẠI: Hàm fetchIncidents ===
+        // === BẮT ĐẦU SỬA LỖI: Hàm fetchIncidents (Bỏ Pie Chart, bỏ format date) ===
         async function fetchIncidents() {
             showLoading();
-            severityPieErrorElem.classList.add('hidden'); sourcePieErrorElem.classList.add('hidden');
-            severityPieNoDataElem.classList.add('hidden'); sourcePieNoDataElem.classList.add('hidden');
-            incidentsTableBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-gray-500">Đang tải dữ liệu...</td></tr>';
+            // Bỏ reset lỗi pie chart
+            incidentsTableBody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-gray-500">Đang tải dữ liệu...</td></tr>'; // Cập nhật colspan
 
             try {
                 const response = await fetch('/api/incidents?limit=100');
@@ -237,44 +176,17 @@
 
                 incidentsTableBody.innerHTML = '';
 
-                const severityCounts = { 'WARNING': 0, 'ERROR': 0, 'CRITICAL': 0, 'INFO': 0, 'Khác': 0 };
-                const sourceCounts = { 'Hạ tầng (K8s)': 0, 'Ứng dụng (Loki)': 0, 'Cả hai': 0 };
-                // === BẮT ĐẦU SỬA LỖI: Lấy ngày hôm nay theo UTC ===
-                const today = new Date();
-                const todayUTCStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0, 0));
-                const todayUTCEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 23, 59, 59, 999));
-                // === KẾT THÚC SỬA LỖI ===
-
+                // Bỏ phần tính toán cho Pie Chart
+                // const severityCounts = ...
+                // const sourceCounts = ...
+                // const today = ...
 
                 if (incidents.length === 0) {
-                    incidentsTableBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-gray-500">Chưa có sự cố nào được ghi nhận.</td></tr>';
-                    severityPieNoDataElem.classList.remove('hidden'); sourcePieNoDataElem.classList.remove('hidden');
-                    if(severityPieInstance) { severityPieInstance.destroy(); severityPieInstance = null; }
-                    if(sourcePieInstance) { sourcePieInstance.destroy(); sourcePieInstance = null; }
+                    incidentsTableBody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-gray-500">Chưa có sự cố nào được ghi nhận.</td></tr>'; // Cập nhật colspan
+                    // Bỏ phần xử lý no-data cho pie chart
                 } else {
                     incidents.forEach(incident => {
-                        // --- Xử lý Pie Chart Data ---
-                        let isToday = false;
-                        try {
-                            // Luôn parse timestamp gốc (UTC)
-                            const incidentDateObj = new Date(incident.timestamp);
-                            if (!isNaN(incidentDateObj.getTime())) {
-                                // So sánh timestamp UTC với khoảng thời gian UTC của ngày hôm nay
-                                if (incidentDateObj >= todayUTCStart && incidentDateObj <= todayUTCEnd) {
-                                    isToday = true;
-                                }
-                            } else {
-                                 console.warn("Could not parse timestamp for pie chart:", incident.timestamp);
-                            }
-                        } catch(e) { console.error("Error processing timestamp for pie chart:", incident.timestamp, e); }
-
-                        if (isToday) { // Chỉ đếm nếu sự cố xảy ra hôm nay (theo UTC)
-                             const severity = incident.severity ? incident.severity.toUpperCase() : 'Khác';
-                             if (severityCounts.hasOwnProperty(severity)) { severityCounts[severity]++; } else { severityCounts['Khác']++; }
-                             const reasons = incident.initial_reasons || '';
-                             const isK8s = reasons.includes('K8s:'); const isLoki = reasons.includes('Loki:');
-                             if (isK8s && isLoki) { sourceCounts['Cả hai']++; } else if (isK8s) { sourceCounts['Hạ tầng (K8s)']++; } else if (isLoki) { sourceCounts['Ứng dụng (Loki)']++; }
-                        }
+                        // Bỏ phần xử lý ngày cho Pie Chart
 
                         // --- Tạo hàng cho bảng ---
                         const row = document.createElement('tr');
@@ -282,28 +194,20 @@
                         if (severityUpper === 'ERROR' || severityUpper === 'CRITICAL') { row.classList.add('bg-red-50'); }
                         else if (severityUpper === 'WARNING') { row.classList.add('bg-yellow-50'); }
 
-                        // === BẮT ĐẦU SỬA LỖI: Hàm tạo cell v6 - Bỏ truncate, dùng wrap ===
+                        // Hàm tạo cell (Giữ nguyên v7)
                         const createCell = (text, allowWrap = false) => {
                             const cell = document.createElement('td');
-                            cell.className = 'px-6 py-4 text-sm text-gray-700 align-top'; // Luôn align top
-
+                            cell.className = 'px-6 py-4 text-sm text-gray-700 align-top';
                             const displayValue = (text === null || text === undefined) ? 'N/A' : String(text);
-
-                            // Gán title là nội dung đầy đủ
-                            cell.title = displayValue;
-                            // Gán textContent
+                            cell.title = displayValue; // Tooltip vẫn dùng giá trị gốc
                             cell.textContent = displayValue;
-
-                            // Cho phép xuống dòng nếu cần
                             if (allowWrap) {
-                                cell.classList.add('whitespace-normal'); // Cho phép xuống dòng tự nhiên
+                                cell.classList.add('whitespace-normal');
                             } else {
-                                cell.classList.add('whitespace-nowrap'); // Giữ không xuống dòng
+                                cell.classList.add('whitespace-nowrap');
                             }
                             return cell;
                         };
-                        // === KẾT THÚC SỬA LỖI ===
-
                         const createSeverityCell = (text) => {
                             const cell = createCell(text); const upperText = text ? text.toUpperCase() : '';
                             if (upperText === 'ERROR' || upperText === 'CRITICAL') { cell.classList.add('font-semibold', 'text-red-600'); }
@@ -311,8 +215,8 @@
                             else { cell.classList.add('text-gray-500'); } return cell;
                         };
 
-                        // Thêm các cell vào row
-                        row.appendChild(createCell(formatVietnameseDateTime(incident.timestamp))); // Format ngày giờ
+                        // Thêm các cell vào row (Bỏ cột Thời gian)
+                        // row.appendChild(createCell(formatVietnameseDateTime(incident.timestamp))); // Bỏ cột này
                         row.appendChild(createCell(incident.pod_key)); // Không wrap
                         row.appendChild(createSeverityCell(incident.severity)); // Không wrap
                         row.appendChild(createCell(incident.summary, true)); // Cho phép wrap
@@ -320,26 +224,22 @@
                         incidentsTableBody.appendChild(row);
                     });
 
-                    // Vẽ Pie Charts
-                    const finalSeverityCounts = Object.fromEntries(Object.entries(severityCounts).filter(([_, v]) => v > 0));
-                    const finalSourceCounts = Object.fromEntries(Object.entries(sourceCounts).filter(([_, v]) => v > 0));
-                    severityPieInstance = renderPieChart(severityPieCtx, severityPieErrorElem, severityPieNoDataElem, severityPieInstance, finalSeverityCounts, 'Phân loại theo Mức độ');
-                    sourcePieInstance = renderPieChart(sourcePieCtx, sourcePieErrorElem, sourcePieNoDataElem, sourcePieInstance, finalSourceCounts, 'Phân loại theo Nguồn gốc');
+                    // Bỏ phần vẽ Pie Charts
+                    // const finalSeverityCounts = ...
+                    // const finalSourceCounts = ...
+                    // severityPieInstance = ...
+                    // sourcePieInstance = ...
                 }
 
             } catch (error) {
                 console.error('Lỗi trong quá trình fetch và xử lý sự cố:', error);
-                incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-red-500">Đã xảy ra lỗi khi tải dữ liệu sự cố: ${error.message}. Vui lòng thử lại hoặc kiểm tra console.</td></tr>`;
-                severityPieErrorElem.textContent = `Lỗi: ${error.message}`; sourcePieErrorElem.textContent = `Lỗi: ${error.message}`;
-                severityPieErrorElem.classList.remove('hidden'); sourcePieErrorElem.classList.remove('hidden');
-                severityPieNoDataElem.classList.add('hidden'); sourcePieNoDataElem.classList.add('hidden');
-                if(severityPieInstance) { severityPieInstance.destroy(); severityPieInstance = null; }
-                if(sourcePieInstance) { sourcePieInstance.destroy(); sourcePieInstance = null; }
+                incidentsTableBody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-red-500">Đã xảy ra lỗi khi tải dữ liệu sự cố: ${error.message}. Vui lòng thử lại hoặc kiểm tra console.</td></tr>`; // Cập nhật colspan
+                // Bỏ phần xử lý lỗi pie chart
             } finally {
                  hideLoading();
             }
         }
-         // === KẾT THÚC XÂY LẠI ===
+         // === KẾT THÚC SỬA LỖI ===
 
 
         // Load dữ liệu lần đầu
