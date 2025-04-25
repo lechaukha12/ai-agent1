@@ -57,6 +57,8 @@
                  <p id="chart-no-data" class="text-center text-gray-500 hidden mt-4">Chưa có đủ dữ liệu thống kê hàng ngày để vẽ biểu đồ.</p>
             </div>
         </section>
+
+
         <section>
             <div class="flex justify-between items-center mb-4">
                  <h2 class="text-2xl font-semibold text-gray-800">Sự cố gần đây (Tối đa 100)</h2>
@@ -92,12 +94,10 @@
         const refreshButton = document.getElementById('refresh-button');
         const loadingSpinner = document.getElementById('loading-spinner');
         const loadingOverlay = document.getElementById('loading-overlay');
-        // === BẮT ĐẦU THAY ĐỔI: Thêm biến cho biểu đồ ===
         const chartCtx = document.getElementById('statsChart').getContext('2d');
         const chartErrorElem = document.getElementById('chart-error');
         const chartNoDataElem = document.getElementById('chart-no-data');
-        let statsChartInstance = null; // Biến để lưu trữ đối tượng biểu đồ
-        // === KẾT THÚC THAY ĐỔI ===
+        let statsChartInstance = null;
 
         function showLoading() {
             loadingSpinner.classList.remove('hidden');
@@ -109,23 +109,17 @@
             loadingOverlay.classList.add('hidden');
         }
 
-        // === BẮT ĐẦU THAY ĐỔI: Hàm vẽ biểu đồ ===
         function renderStatsChart(dailyStats) {
-             chartErrorElem.classList.add('hidden'); // Ẩn lỗi cũ (nếu có)
-             chartNoDataElem.classList.add('hidden'); // Ẩn thông báo không có data
+             chartErrorElem.classList.add('hidden');
+             chartNoDataElem.classList.add('hidden');
 
-             // Cần ít nhất 2 điểm dữ liệu để vẽ đường
              if (!dailyStats || dailyStats.length < 2) {
                  console.warn("Không đủ dữ liệu hàng ngày để vẽ biểu đồ.");
-                 chartNoDataElem.classList.remove('hidden'); // Hiện thông báo
-                 if (statsChartInstance) {
-                     statsChartInstance.destroy(); // Xóa biểu đồ cũ nếu có
-                     statsChartInstance = null;
-                 }
+                 chartNoDataElem.classList.remove('hidden');
+                 if (statsChartInstance) { statsChartInstance.destroy(); statsChartInstance = null; }
                  return;
              }
 
-             // Sắp xếp dữ liệu theo ngày tăng dần (API trả về giảm dần)
              dailyStats.sort((a, b) => new Date(a.date) - new Date(b.date));
 
              const labels = dailyStats.map(stat => stat.date);
@@ -136,109 +130,43 @@
              const chartData = {
                  labels: labels,
                  datasets: [
-                     {
-                         label: 'Sự Cố',
-                         data: incidentData,
-                         borderColor: 'rgb(239, 68, 68)', // Màu đỏ
-                         backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                         tension: 0.1,
-                         fill: true, // Tô màu vùng dưới đường
-                     },
-                     {
-                         label: 'Gọi Gemini',
-                         data: geminiData,
-                         borderColor: 'rgb(59, 130, 246)', // Màu xanh dương
-                         backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                         tension: 0.1,
-                         fill: true,
-                     },
-                     {
-                         label: 'Cảnh báo Telegram',
-                         data: telegramData,
-                         borderColor: 'rgb(34, 197, 94)', // Màu xanh lá
-                         backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                         tension: 0.1,
-                         fill: true,
-                     }
+                     { label: 'Sự Cố', data: incidentData, borderColor: 'rgb(239, 68, 68)', backgroundColor: 'rgba(239, 68, 68, 0.1)', tension: 0.1, fill: true, },
+                     { label: 'Gọi Gemini', data: geminiData, borderColor: 'rgb(59, 130, 246)', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.1, fill: true, },
+                     { label: 'Cảnh báo Telegram', data: telegramData, borderColor: 'rgb(34, 197, 94)', backgroundColor: 'rgba(34, 197, 94, 0.1)', tension: 0.1, fill: true, }
                  ]
              };
 
              const chartConfig = {
-                 type: 'line',
-                 data: chartData,
-                 options: {
-                     responsive: true,
-                     maintainAspectRatio: false, // Cho phép biểu đồ co giãn chiều cao
-                     scales: {
-                         y: {
-                             beginAtZero: true, // Bắt đầu trục Y từ 0
-                             ticks: {
-                                  // Chỉ hiển thị số nguyên trên trục Y
-                                  precision: 0
-                              }
-                         }
-                     },
-                     plugins: {
-                         legend: {
-                             position: 'top', // Hiển thị chú thích ở trên
-                         },
-                         tooltip: {
-                             mode: 'index', // Hiển thị tooltip cho tất cả dataset tại điểm đó
-                             intersect: false,
-                         }
-                     }
-                 }
+                 type: 'line', data: chartData,
+                 options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }, plugins: { legend: { position: 'top', }, tooltip: { mode: 'index', intersect: false, } } }
              };
 
-             // Nếu đã có biểu đồ cũ, hủy nó đi trước khi vẽ cái mới
-             if (statsChartInstance) {
-                 statsChartInstance.destroy();
-             }
-             // Vẽ biểu đồ mới
+             if (statsChartInstance) { statsChartInstance.destroy(); }
              statsChartInstance = new Chart(chartCtx, chartConfig);
         }
-        // === KẾT THÚC THAY ĐỔI ===
 
 
         async function fetchStats() {
             try {
                 const response = await fetch('/api/stats?days=7');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
                 const stats = await response.json();
-
                 if (stats.error) {
                     console.error("Error fetching stats:", stats.error);
-                    totalIncidentsElem.textContent = 'Lỗi';
-                    totalGeminiCallsElem.textContent = 'Lỗi';
-                    totalTelegramAlertsElem.textContent = 'Lỗi';
-                    // === BẮT ĐẦU THAY ĐỔI: Hiện lỗi biểu đồ ===
-                    chartErrorElem.classList.remove('hidden');
-                    chartNoDataElem.classList.add('hidden');
+                    totalIncidentsElem.textContent = 'Lỗi'; totalGeminiCallsElem.textContent = 'Lỗi'; totalTelegramAlertsElem.textContent = 'Lỗi';
+                    chartErrorElem.classList.remove('hidden'); chartNoDataElem.classList.add('hidden');
                     if (statsChartInstance) { statsChartInstance.destroy(); statsChartInstance = null; }
-                    // === KẾT THÚC THAY ĐỔI ===
                     return;
                 }
-
                 totalIncidentsElem.textContent = stats.total_incidents ?? '--';
                 totalGeminiCallsElem.textContent = stats.total_gemini_calls ?? '--';
                 totalTelegramAlertsElem.textContent = stats.total_telegram_alerts ?? '--';
-
-                // === BẮT ĐẦU THAY ĐỔI: Gọi hàm vẽ biểu đồ ===
                 renderStatsChart(stats.daily_stats);
-                // === KẾT THÚC THAY ĐỔI ===
-
             } catch (error) {
                 console.error('Error fetching stats:', error);
-                totalIncidentsElem.textContent = 'Lỗi';
-                totalGeminiCallsElem.textContent = 'Lỗi';
-                totalTelegramAlertsElem.textContent = 'Lỗi';
-                 // === BẮT ĐẦU THAY ĐỔI: Hiện lỗi biểu đồ ===
-                chartErrorElem.classList.remove('hidden');
-                chartNoDataElem.classList.add('hidden');
+                totalIncidentsElem.textContent = 'Lỗi'; totalGeminiCallsElem.textContent = 'Lỗi'; totalTelegramAlertsElem.textContent = 'Lỗi';
+                chartErrorElem.classList.remove('hidden'); chartNoDataElem.classList.add('hidden');
                 if (statsChartInstance) { statsChartInstance.destroy(); statsChartInstance = null; }
-                // === KẾT THÚC THAY ĐỔI ===
             }
         }
 
@@ -246,25 +174,29 @@
             showLoading();
             try {
                 const response = await fetch('/api/incidents?limit=100');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
                 const incidents = await response.json();
-
                 if (incidents.error) {
                      console.error("Error fetching incidents:", incidents.error);
                      incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-red-500">Lỗi tải dữ liệu sự cố: ${incidents.error}</td></tr>`;
                      return;
                 }
-
                 incidentsTableBody.innerHTML = '';
-
                 if (incidents.length === 0) {
                     incidentsTableBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-gray-500">Chưa có sự cố nào được ghi nhận.</td></tr>';
                 } else {
                     incidents.forEach(incident => {
                         const row = document.createElement('tr');
-                        row.classList.add(incident.severity === 'ERROR' || incident.severity === 'CRITICAL' ? 'bg-red-50' : (incident.severity === 'WARNING' ? 'bg-yellow-50' : ''));
+                        // === BẮT ĐẦU SỬA LỖI ===
+                        // Chỉ thêm class nếu severity là WARNING, ERROR, hoặc CRITICAL
+                        const severity = incident.severity ? incident.severity.toUpperCase() : ''; // Lấy severity và chuyển thành chữ hoa, hoặc chuỗi rỗng nếu null/undefined
+                        if (severity === 'ERROR' || severity === 'CRITICAL') {
+                            row.classList.add('bg-red-50');
+                        } else if (severity === 'WARNING') {
+                            row.classList.add('bg-yellow-50');
+                        }
+                        // === KẾT THÚC SỬA LỖI ===
+
                         const createCell = (text) => {
                             const cell = document.createElement('td');
                             cell.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-700';
@@ -273,9 +205,10 @@
                         };
                         const createSeverityCell = (text) => {
                             const cell = createCell(text);
-                            if (text === 'ERROR' || text === 'CRITICAL') {
+                            const upperText = text ? text.toUpperCase() : '';
+                            if (upperText === 'ERROR' || upperText === 'CRITICAL') {
                                 cell.classList.add('font-semibold', 'text-red-600');
-                            } else if (text === 'WARNING') {
+                            } else if (upperText === 'WARNING') {
                                 cell.classList.add('font-semibold', 'text-yellow-600');
                             } else {
                                  cell.classList.add('text-gray-500');
