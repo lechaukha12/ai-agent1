@@ -41,7 +41,6 @@ graph LR
     B -- No Alert Needed --> E;
     E --> A;
 
-
 Yêu cầu
 Cluster Kubernetes đang hoạt động.
 
@@ -80,7 +79,6 @@ echo -n 'YOUR_GEMINI_API_KEY' | base64
 echo -n 'YOUR_TELEGRAM_BOT_TOKEN' | base64
 echo -n 'YOUR_TELEGRAM_CHAT_ID' | base64
 
-
 Dán các chuỗi đã mã hóa vào các trường tương ứng (GEMINI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID) trong file secret.yaml.
 
 k8s/configmap.yaml:
@@ -105,7 +103,6 @@ docker buildx build --platform linux/amd64 -t your-dockerhub-username/ai-agent1:
 # Hoặc build multi-platform
 # docker buildx build --platform linux/amd64,linux/arm64 -t your-dockerhub-username/ai-agent1:v1.0 --push .
 
-
 Cập nhật Deployment: Chỉnh sửa file k8s/deployment.yaml, thay thế giá trị spec.template.spec.containers[0].image bằng tên image và tag bạn vừa build.
 
 Triển khai
@@ -123,16 +120,13 @@ kubectl apply -f k8s/deployment.yaml -n monitoring
 # (Tùy chọn) Áp dụng NetworkPolicy nếu cần
 # kubectl apply -f k8s/networkpolicy.yaml -n monitoring
 
-
 Kiểm tra trạng thái pod:
 
 kubectl get pods -n monitoring -l app=ai-agent1
 
-
 Xem log của agent:
 
 kubectl logs -n monitoring -l app=ai-agent1 -f
-
 
 Cấu hình chi tiết
 ConfigMap (k8s/configmap.yaml)
@@ -177,7 +171,6 @@ Bạn sẽ nhận được thông báo trên Telegram với định dạng tươ
 
 _Vui lòng kiểm tra log trên Loki để biết thêm chi tiết._
 
-
 Tùy chỉnh
 Thay đổi Namespace/Mức độ log/Cảnh báo: Chỉnh sửa các giá trị trong k8s/configmap.yaml và áp dụng lại ConfigMap, sau đó khởi động lại pod agent (kubectl rollout restart deployment ai-agent1 -n monitoring).
 
@@ -187,6 +180,7 @@ Thêm Logic Lọc: Chỉnh sửa hàm preprocess_and_filter trong app/main.py đ
 
 Cấu trúc mã nguồn
 app/main.py: Mã nguồn chính của agent Python.
+
 app/requirements.txt: Danh sách các thư viện Python cần thiết.
 
 Dockerfile: File định nghĩa cách build Docker image cho agent.
@@ -197,5 +191,5 @@ configmap.yaml: Định nghĩa cấu hình cho agent.
 
 secret.yaml: Định nghĩa các thông tin nhạy cảm (API keys, tokens).
 
-deployment.yaml: Định nghĩa cách triển khai agent lên
+deployment.yaml: Định nghĩa cách triển khai agent lên Kubernetes.
 
