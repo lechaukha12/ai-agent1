@@ -1,0 +1,42 @@
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: k8s-log-agent
+      namespace: kube-observability # Đảm bảo đúng namespace
+      labels:
+        app: k8s-log-agent
+    spec:
+      replicas: 1 # Chạy 1 bản sao agent
+      selector:
+        matchLabels:
+          app: k8s-log-agent
+      template:
+        metadata:
+          labels:
+            app: k8s-log-agent
+        spec:
+          containers:
+          - name: agent
+            # !!! THAY THẾ BẰNG TÊN IMAGE CỦA BẠN !!!
+            image: lechaukha12/ai-agent1:v1.0.0
+            imagePullPolicy: Always # Luôn kéo image mới nhất
+            envFrom:
+              - configMapRef:
+                  name: k8s-log-agent-config # Tải biến môi trường từ ConfigMap
+              - secretRef:
+                  name: k8s-log-agent-secret   # Tải biến môi trường từ Secret
+            resources: # Giới hạn tài nguyên (điều chỉnh nếu cần)
+              requests:
+                cpu: "100m"
+                memory: "128Mi"
+              limits:
+                cpu: "500m"
+                memory: "512Mi"
+          # Service account (nếu cần quyền đặc biệt, thường không cần cho việc này)
+          # serviceAccountName: your-service-account
+          # Security context (chạy với user không phải root)
+          securityContext:
+             runAsNonRoot: true
+             runAsUser: 1001 # Chọn một user ID không phải root
+             fsGroup: 1001
+    
