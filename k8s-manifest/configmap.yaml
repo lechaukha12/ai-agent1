@@ -4,15 +4,13 @@ metadata:
   name: k8s-log-agent-config
   namespace: kube-observability
 data:
-  LOKI_URL: "http://loki-loki-distributed-query-frontend:3100" # !!! THAY THẾ BẰNG URL LOKI CỦA BẠN !!!
-  QUERY_INTERVAL_SECONDS: "60"
-  LOKI_QUERY_RANGE_MINUTES: "5"
-  LOKI_QUERY_LIMIT: "1000"
-  K8S_NAMESPACES: "kube-system,app-infra" # Danh sách namespace, cách nhau bởi dấu phẩy
-  # Mức log tối thiểu để gửi cho Gemini phân tích (DEBUG, INFO, WARNING, ERROR, CRITICAL, ...)
-  MIN_LOG_LEVEL_FOR_GEMINI: "INFO"
-  # --- THÊM CẤU HÌNH MỚI ---
-  # Các mức độ nghiêm trọng (do Gemini xác định) sẽ kích hoạt cảnh báo Telegram, cách nhau bởi dấu phẩy
-  ALERT_SEVERITY_LEVELS: "ERROR,CRITICAL" # Ví dụ: Chỉ cảnh báo ERROR và CRITICAL
-  # Bạn có thể đổi thành "WARNING,ERROR,CRITICAL" nếu muốn cảnh báo cả WARNING
-  GEMINI_MODEL_NAME: "gemini-1.5-flash"
+  # Sửa dòng này: Bỏ dấu nháy kép bao quanh
+  ALERT_SEVERITY_LEVELS: WARNING,ERROR,CRITICAL
+  GEMINI_MODEL_NAME: gemini-1.5-flash
+  K8S_NAMESPACES: kube-system,app-infra,alfinac-bee-logistics
+  LOKI_QUERY_LIMIT: '1000'
+  LOKI_QUERY_RANGE_MINUTES: '5'
+  LOKI_URL: http://loki-loki-distributed-query-frontend:3100
+  # Đảm bảo dòng này đúng
+  MIN_LOG_LEVEL_FOR_GEMINI: WARNING
+  QUERY_INTERVAL_SECONDS: '30'

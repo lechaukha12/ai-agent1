@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8s-log-agent-sa # Đổi tên Service Account
+  namespace: kube-observability # Đổi namespace của agent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8s-log-agent-reader # Đổi tên ClusterRole
+rules:
+- apiGroups: [""] # Core API group
+  resources: ["pods", "nodes", "events"]
+  verbs: ["get", "list", "watch"] # Quyền cần thiết
+- apiGroups: ["metrics.k8s.io"] # API group cho metrics (tùy chọn)
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-log-agent-reader-binding # Đổi tên ClusterRoleBinding
+subjects:
+- kind: ServiceAccount
+  name: k8s-log-agent-sa # Đổi tên Service Account tham chiếu
+  namespace: kube-observability # Namespace mới của Service Account
+roleRef:
+  kind: ClusterRole
+  name: k8s-log-agent-reader # Đổi tên ClusterRole tham chiếu
+  apiGroup: rbac.authorization.k8s.io
+    

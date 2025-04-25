@@ -1,42 +1,41 @@
-    apiVersion: apps/v1
-    kind: Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-log-agent # Đổi tên Deployment
+  namespace: kube-observability # Namespace mới
+  labels:
+    app: k8s-log-agent # Đổi label
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k8s-log-agent # Đổi label selector
+  template:
     metadata:
-      name: k8s-log-agent
-      namespace: kube-observability # Đảm bảo đúng namespace
       labels:
-        app: k8s-log-agent
+        app: k8s-log-agent # Đổi label pod
     spec:
-      replicas: 1 # Chạy 1 bản sao agent
-      selector:
-        matchLabels:
-          app: k8s-log-agent
-      template:
-        metadata:
-          labels:
-            app: k8s-log-agent
-        spec:
-          containers:
-          - name: agent
-            # !!! THAY THẾ BẰNG TÊN IMAGE CỦA BẠN !!!
-            image: lechaukha12/ai-agent1:v1.0.0
-            imagePullPolicy: Always # Luôn kéo image mới nhất
-            envFrom:
-              - configMapRef:
-                  name: k8s-log-agent-config # Tải biến môi trường từ ConfigMap
-              - secretRef:
-                  name: k8s-log-agent-secret   # Tải biến môi trường từ Secret
-            resources: # Giới hạn tài nguyên (điều chỉnh nếu cần)
-              requests:
-                cpu: "100m"
-                memory: "128Mi"
-              limits:
-                cpu: "500m"
-                memory: "512Mi"
-          # Service account (nếu cần quyền đặc biệt, thường không cần cho việc này)
-          # serviceAccountName: your-service-account
-          # Security context (chạy với user không phải root)
-          securityContext:
-             runAsNonRoot: true
-             runAsUser: 1001 # Chọn một user ID không phải root
-             fsGroup: 1001
-    
+      serviceAccountName: k8s-log-agent-sa # Sử dụng Service Account đã đổi tên
+      containers:
+      - name: agent
+        # !!! THAY THẾ BẰNG TÊN IMAGE CỦA BẠN (ví dụ: v0.6) !!!
+        image: your-dockerhub-username/k8s-log-agent:v1.0 # Giữ tên image nhưng có thể tăng version
+        imagePullPolicy: Always
+        envFrom:
+          - configMapRef:
+              # Giữ nguyên tên ConfigMap hoặc đổi nếu muốn (ví dụ: k8s-log-agent-config)
+              name: k8s-log-agent-config
+          - secretRef:
+              # Giữ nguyên tên Secret hoặc đổi nếu muốn (ví dụ: k8s-log-agent-secret)
+              name: k8s-log-agent-secret
+        resources:
+          requests:
+            cpu: "150m"
+            memory: "256Mi"
+          limits:
+            cpu: "750m"
+            memory: "768Mi"
+      securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001
+          fsGroup: 1001
