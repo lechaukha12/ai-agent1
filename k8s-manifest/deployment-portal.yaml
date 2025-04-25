@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-log-agent-portal # Tên Deployment cho portal
+  namespace: kube-observability # Cùng namespace với agent và PVC
+  labels:
+    app: k8s-log-agent-portal
+spec:
+  replicas: 1 # Chạy 1 bản sao portal
+  selector:
+    matchLabels:
+      app: k8s-log-agent-portal
+  template:
+    metadata:
+      labels:
+        app: k8s-log-agent-portal
+    spec:
+      # Không cần ServiceAccount riêng vì chỉ đọc PV
+      containers:
+      - name: portal
+        # !!! THAY THẾ BẰNG TÊN IMAGE PORTAL CỦA BẠN !!!
+        image: lechaukha12/ai-agent1-portal:v1.0.4
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000 # Port Flask chạy
+        env:
+        # Truyền đường dẫn DB và múi giờ vào portal
+        - name: DB_PATH
+          value: "/data/agent_stats.db" # Giống agent
+        - name: TZ
+          value: Asia/Ho_Chi_Minh # Để log của portal đúng giờ
+        volumeMounts:
+        - name: agent-data # Tên volume mount phải khớp tên volume
+          mountPath: /data   # Mount cùng thư mục /data
+          # readOnly: true # Lý tưởng là true nếu StorageClass/accessMode hỗ trợ
+                          # Tạm thời để false (mặc định) cho đơn giản
+        resources: # Portal thường nhẹ hơn agent
+          requests:
+            cpu: "50m"
+            memory: "128Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+      # Mount cùng PVC với agent
+      volumes:
+      - name: agent-data # Tên volume
+        persistentVolumeClaim:
+          claimName: k8s-log-agent-data-pvc # Dùng chung PVC
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8s-log-agent-portal-svc # Tên Service cho portal
+  namespace: kube-observability
+  labels:
+    app: k8s-log-agent-portal
+spec:
+  selector:
+    app: k8s-log-agent-portal # Chọn các pod của portal deployment
+  ports:
+    - protocol: TCP
+      port: 80 # Port của Service (có thể truy cập nội bộ)
+      targetPort: 5000 # Port mà container Flask đang chạy
+  # Type: ClusterIP là mặc định, chỉ truy cập được bên trong cluster
+  # Đổi thành NodePort hoặc LoadBalancer nếu muốn truy cập từ bên ngoài
+  # type: ClusterIP
+  # Hoặc type: NodePort

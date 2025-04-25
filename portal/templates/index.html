@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>K8s Log Agent Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .stat-card { transition: transform 0.2s ease-in-out; }
+        .stat-card:hover { transform: translateY(-5px); }
+        #loading-spinner { border-top-color: #3498db; }
+        .chart-container { min-height: 300px; position: relative; }
+        /* Bỏ style cũ */
+        /* Căn chỉnh chiều rộng cột mới (4 cột) */
+        #incidents-table th:nth-child(1), #incidents-table td:nth-child(1) { width: 25%; } /* Pod */
+        #incidents-table th:nth-child(2), #incidents-table td:nth-child(2) { width: 15%; } /* Mức độ */
+        #incidents-table th:nth-child(3), #incidents-table td:nth-child(3) { width: 30%; } /* Tóm tắt */
+        #incidents-table th:nth-child(4), #incidents-table td:nth-child(4) { width: 30%; } /* Lý do */
+    </style>
+     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-100 text-gray-800 p-4 md:p-8">
+    <div class="max-w-7xl mx-auto">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900 mb-2">K8s Log Agent Dashboard</h1>
+            <p class="text-gray-600">Theo dõi sự cố và hoạt động của agent.</p>
+            <p class="text-xs text-gray-500 mt-1">Đọc dữ liệu từ: <code id="db-path" class="bg-gray-200 px-1 rounded">{{ db_path }}</code></p>
+        </header>
+
+        <div id="loading-spinner" class="hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 border-4 border-gray-300 border-t-4 rounded-full w-12 h-12 animate-spin z-50"></div>
+        <div id="loading-overlay" class="hidden fixed inset-0 bg-gray-500 bg-opacity-50 z-40"></div>
+
+
+        <section class="mb-8">
+            <h2 class="text-2xl font-semibold mb-4 text-gray-800">Tổng quan Hôm Nay (<span id="today-date"></span>)</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="stat-card bg-white p-6 rounded-lg shadow-md border border-gray-200">
+                    <h3 class="text-lg font-semibold text-red-600 mb-2">Sự Cố Hôm Nay</h3>
+                    <p id="total-incidents" class="text-4xl font-bold text-red-500">--</p>
+                </div>
+                <div class="stat-card bg-white p-6 rounded-lg shadow-md border border-gray-200">
+                    <h3 class="text-lg font-semibold text-blue-600 mb-2">Lượt gọi Gemini</h3>
+                    <p id="total-gemini-calls" class="text-4xl font-bold text-blue-500">--</p>
+                </div>
+                <div class="stat-card bg-white p-6 rounded-lg shadow-md border border-gray-200">
+                    <h3 class="text-lg font-semibold text-green-600 mb-2">Cảnh báo Telegram</h3>
+                    <p id="total-telegram-alerts" class="text-4xl font-bold text-green-500">--</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="mb-8">
+             <div>
+                <h2 class="text-2xl font-semibold mb-4 text-gray-800">Xu hướng hàng ngày (7 ngày)</h2>
+                <div class="bg-white p-4 md:p-6 rounded-lg shadow-md border border-gray-200 chart-container" id="statsChartContainer">
+                     <canvas id="statsChart"></canvas>
+                     <p id="line-chart-error" class="text-center text-red-500 hidden mt-4">Lỗi tải dữ liệu biểu đồ đường.</p>
+                     <p id="line-chart-no-data" class="text-center text-gray-500 hidden mt-4">Chưa có đủ dữ liệu thống kê hàng ngày để vẽ biểu đồ đường.</p>
+                </div>
+            </div>
+        </section>
+        <section>
+            <div class="flex justify-between items-center mb-4">
+                 <h2 class="text-2xl font-semibold text-gray-800">Sự cố gần đây (Tối đa 100)</h2>
+                 <button id="refresh-button" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200 ease-in-out">
+                     Làm mới
+                 </button>
+            </div>
+            <div class="bg-white rounded-lg shadow-md overflow-x-auto border border-gray-200">
+                <table id="incidents-table" class="min-w-full divide-y divide-gray-200 table-fixed">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pod</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Mức độ</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tóm tắt</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lý do phát hiện</th>
+                            </tr>
+                    </thead>
+                    <tbody id="incidents-table-body" class="bg-white divide-y divide-gray-200">
+                        <tr><td colspan="4" class="text-center py-4 text-gray-500">Đang tải dữ liệu...</td></tr>
+                        </tbody>
+                </table>
+            </div>
+        </section>
+
+    </div>
+
+    <script>
+        // === Biến DOM ===
+        const incidentsTableBody = document.getElementById('incidents-table-body');
+        const totalIncidentsElem = document.getElementById('total-incidents');
+        const totalGeminiCallsElem = document.getElementById('total-gemini-calls');
+        const totalTelegramAlertsElem = document.getElementById('total-telegram-alerts');
+        const todayDateElem = document.getElementById('today-date');
+        const refreshButton = document.getElementById('refresh-button');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const lineChartCtx = document.getElementById('statsChart').getContext('2d');
+        const lineChartErrorElem = document.getElementById('line-chart-error');
+        const lineChartNoDataElem = document.getElementById('line-chart-no-data');
+        let lineChartInstance = null;
+        // === THAY ĐỔI: Bỏ biến Pie Chart ===
+        // const severityPieCtx = ...
+        // const sourcePieCtx = ...
+        // === KẾT THÚC THAY ĐỔI ===
+
+        // === Hàm tiện ích ===
+        function showLoading() { loadingSpinner.classList.remove('hidden'); loadingOverlay.classList.remove('hidden'); }
+        function hideLoading() { loadingSpinner.classList.add('hidden'); loadingOverlay.classList.add('hidden'); }
+        // === THAY ĐỔI: Bỏ hàm format ngày giờ vì không dùng nữa ===
+        // function formatVietnameseDateTime(isoString) { ... }
+        // === KẾT THÚC THAY ĐỔI ===
+        function setTodayDate() { /* ... Giữ nguyên ... */
+             const today = new Date();
+             const day = String(today.getDate()).padStart(2, '0');
+             const month = String(today.getMonth() + 1).padStart(2, '0');
+             const year = today.getFullYear();
+             todayDateElem.textContent = `${day}/${month}/${year}`;
+        }
+
+        // === Hàm vẽ biểu đồ (Giữ nguyên Line Chart, bỏ Pie Chart) ===
+        function renderLineChart(dailyStats) { /* ... Giữ nguyên ... */
+             lineChartErrorElem.classList.add('hidden'); lineChartNoDataElem.classList.add('hidden');
+             if (!dailyStats || dailyStats.length < 1) { console.warn("Không đủ dữ liệu hàng ngày để vẽ biểu đồ đường."); lineChartNoDataElem.classList.remove('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; } return; }
+             dailyStats.sort((a, b) => new Date(a.date) - new Date(b.date));
+             const labels = dailyStats.map(stat => stat.date);
+             const incidentData = dailyStats.map(stat => stat.incident_count);
+             const geminiData = dailyStats.map(stat => stat.gemini_calls);
+             const telegramData = dailyStats.map(stat => stat.telegram_alerts);
+             const chartData = { labels: labels, datasets: [ { label: 'Sự Cố', data: incidentData, borderColor: 'rgb(239, 68, 68)', backgroundColor: 'rgba(239, 68, 68, 0.1)', tension: 0.1, fill: true, }, { label: 'Gọi Gemini', data: geminiData, borderColor: 'rgb(59, 130, 246)', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.1, fill: true, }, { label: 'Cảnh báo Telegram', data: telegramData, borderColor: 'rgb(34, 197, 94)', backgroundColor: 'rgba(34, 197, 94, 0.1)', tension: 0.1, fill: true, } ] };
+             const chartConfig = { type: 'line', data: chartData, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }, plugins: { legend: { position: 'top', }, tooltip: { mode: 'index', intersect: false, } } } };
+             if (lineChartInstance) { lineChartInstance.destroy(); }
+             lineChartInstance = new Chart(lineChartCtx, chartConfig);
+        }
+        // === THAY ĐỔI: Bỏ hàm renderPieChart ===
+        // function renderPieChart(...) { ... }
+        // === KẾT THÚC THAY ĐỔI ===
+
+        // === Hàm Fetch dữ liệu (Giữ nguyên fetchStats) ===
+        async function fetchStats() { /* ... Giữ nguyên ... */
+            try {
+                const response = await fetch('/api/stats?days=1');
+                if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
+                const stats = await response.json();
+                if (stats.error) { console.error("Error fetching stats:", stats.error); totalIncidentsElem.textContent = 'Lỗi'; totalGeminiCallsElem.textContent = 'Lỗi'; totalTelegramAlertsElem.textContent = 'Lỗi'; lineChartErrorElem.classList.remove('hidden'); lineChartNoDataElem.classList.add('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; } return; }
+                const todayStr = new Date().toISOString().split('T')[0];
+                const todayStats = stats.daily_stats.find(d => d.date === todayStr);
+                if (todayStats) { totalIncidentsElem.textContent = todayStats.incident_count ?? '0'; totalGeminiCallsElem.textContent = todayStats.gemini_calls ?? '0'; totalTelegramAlertsElem.textContent = todayStats.telegram_alerts ?? '0'; }
+                else { totalIncidentsElem.textContent = '0'; totalGeminiCallsElem.textContent = '0'; totalTelegramAlertsElem.textContent = '0'; }
+                const response7days = await fetch('/api/stats?days=7');
+                const stats7days = await response7days.json();
+                if (!stats7days.error) { renderLineChart(stats7days.daily_stats); }
+                else { renderLineChart([]); }
+            } catch (error) { console.error('Error fetching stats:', error); totalIncidentsElem.textContent = 'Lỗi'; totalGeminiCallsElem.textContent = 'Lỗi'; totalTelegramAlertsElem.textContent = 'Lỗi'; lineChartErrorElem.classList.remove('hidden'); lineChartNoDataElem.classList.add('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; } }
+        }
+
+        // === BẮT ĐẦU SỬA LỖI: Hàm fetchIncidents (Bỏ Pie Chart, bỏ format date) ===
+        async function fetchIncidents() {
+            showLoading();
+            // Bỏ reset lỗi pie chart
+            incidentsTableBody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-gray-500">Đang tải dữ liệu...</td></tr>'; // Cập nhật colspan
+
+            try {
+                const response = await fetch('/api/incidents?limit=100');
+                if (!response.ok) {
+                    let errorMsg = `HTTP error! status: ${response.status}`;
+                    try { const errorData = await response.json(); errorMsg = errorData.error || errorMsg; } catch (e) {}
+                    throw new Error(errorMsg);
+                }
+                const incidents = await response.json();
+                if (incidents.error) { throw new Error(`API Error: ${incidents.error}`); }
+
+                incidentsTableBody.innerHTML = '';
+
+                // Bỏ phần tính toán cho Pie Chart
+                // const severityCounts = ...
+                // const sourceCounts = ...
+                // const today = ...
+
+                if (incidents.length === 0) {
+                    incidentsTableBody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-gray-500">Chưa có sự cố nào được ghi nhận.</td></tr>'; // Cập nhật colspan
+                    // Bỏ phần xử lý no-data cho pie chart
+                } else {
+                    incidents.forEach(incident => {
+                        // Bỏ phần xử lý ngày cho Pie Chart
+
+                        // --- Tạo hàng cho bảng ---
+                        const row = document.createElement('tr');
+                        const severityUpper = incident.severity ? incident.severity.toUpperCase() : '';
+                        if (severityUpper === 'ERROR' || severityUpper === 'CRITICAL') { row.classList.add('bg-red-50'); }
+                        else if (severityUpper === 'WARNING') { row.classList.add('bg-yellow-50'); }
+
+                        // Hàm tạo cell (Giữ nguyên v7)
+                        const createCell = (text, allowWrap = false) => {
+                            const cell = document.createElement('td');
+                            cell.className = 'px-6 py-4 text-sm text-gray-700 align-top';
+                            const displayValue = (text === null || text === undefined) ? 'N/A' : String(text);
+                            cell.title = displayValue; // Tooltip vẫn dùng giá trị gốc
+                            cell.textContent = displayValue;
+                            if (allowWrap) {
+                                cell.classList.add('whitespace-normal');
+                            } else {
+                                cell.classList.add('whitespace-nowrap');
+                            }
+                            return cell;
+                        };
+                        const createSeverityCell = (text) => {
+                            const cell = createCell(text); const upperText = text ? text.toUpperCase() : '';
+                            if (upperText === 'ERROR' || upperText === 'CRITICAL') { cell.classList.add('font-semibold', 'text-red-600'); }
+                            else if (upperText === 'WARNING') { cell.classList.add('font-semibold', 'text-yellow-600'); }
+                            else { cell.classList.add('text-gray-500'); } return cell;
+                        };
+
+                        // Thêm các cell vào row (Bỏ cột Thời gian)
+                        // row.appendChild(createCell(formatVietnameseDateTime(incident.timestamp))); // Bỏ cột này
+                        row.appendChild(createCell(incident.pod_key)); // Không wrap
+                        row.appendChild(createSeverityCell(incident.severity)); // Không wrap
+                        row.appendChild(createCell(incident.summary, true)); // Cho phép wrap
+                        row.appendChild(createCell(incident.initial_reasons, true)); // Cho phép wrap
+                        incidentsTableBody.appendChild(row);
+                    });
+
+                    // Bỏ phần vẽ Pie Charts
+                    // const finalSeverityCounts = ...
+                    // const finalSourceCounts = ...
+                    // severityPieInstance = ...
+                    // sourcePieInstance = ...
+                }
+
+            } catch (error) {
+                console.error('Lỗi trong quá trình fetch và xử lý sự cố:', error);
+                incidentsTableBody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-red-500">Đã xảy ra lỗi khi tải dữ liệu sự cố: ${error.message}. Vui lòng thử lại hoặc kiểm tra console.</td></tr>`; // Cập nhật colspan
+                // Bỏ phần xử lý lỗi pie chart
+            } finally {
+                 hideLoading();
+            }
+        }
+         // === KẾT THÚC SỬA LỖI ===
+
+
+        // Load dữ liệu lần đầu
+        document.addEventListener('DOMContentLoaded', () => {
+            setTodayDate();
+            fetchStats();
+            fetchIncidents();
+        });
+
+        // Refresh
+        refreshButton.addEventListener('click', () => {
+             fetchStats();
+             fetchIncidents();
+        });
+
+    </script>
+</body>
+</html>
