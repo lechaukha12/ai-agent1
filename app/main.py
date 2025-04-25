@@ -14,6 +14,8 @@ try:
 except ImportError:
     logging.error("zoneinfo module not found. Please use Python 3.9+ or install pytz and uncomment the fallback.")
     exit(1)
+import sqlite3
+import threading
 
 
 # --- Tải biến môi trường từ file .env (cho phát triển cục bộ) ---
@@ -27,17 +29,20 @@ LOKI_URL = os.environ.get("LOKI_URL", "http://loki-read.monitoring.svc.cluster.l
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-SCAN_INTERVAL_SECONDS = int(os.environ.get("SCAN_INTERVAL_SECONDS", 30)) # Mặc định 30s
-LOKI_SCAN_RANGE_MINUTES = int(os.environ.get("LOKI_SCAN_RANGE_MINUTES", 1)) # Quét log 1 phút gần nhất
-LOKI_DETAIL_LOG_RANGE_MINUTES = int(os.environ.get("LOKI_DETAIL_LOG_RANGE_MINUTES", 30)) # Lấy log 30 phút
+SCAN_INTERVAL_SECONDS = int(os.environ.get("SCAN_INTERVAL_SECONDS", 30))
+LOKI_SCAN_RANGE_MINUTES = int(os.environ.get("LOKI_SCAN_RANGE_MINUTES", 1))
+LOKI_DETAIL_LOG_RANGE_MINUTES = int(os.environ.get("LOKI_DETAIL_LOG_RANGE_MINUTES", 30))
 LOKI_QUERY_LIMIT = int(os.environ.get("LOKI_QUERY_LIMIT", 500))
 K8S_NAMESPACES_STR = os.environ.get("K8S_NAMESPACES", "kube-system")
 K8S_NAMESPACES = [ns.strip() for ns in K8S_NAMESPACES_STR.split(',') if ns.strip()]
-LOKI_SCAN_MIN_LEVEL = os.environ.get("LOKI_SCAN_MIN_LEVEL", "WARNING") # Chỉ quét tìm WARNING/ERROR trở lên
+LOKI_SCAN_MIN_LEVEL = os.environ.get("LOKI_SCAN_MIN_LEVEL", "WARNING")
 GEMINI_MODEL_NAME = os.environ.get("GEMINI_MODEL_NAME", "gemini-1.5-flash")
-ALERT_SEVERITY_LEVELS_STR = os.environ.get("ALERT_SEVERITY_LEVELS", "WARNING,ERROR,CRITICAL") # Cảnh báo cả WARNING
+ALERT_SEVERITY_LEVELS_STR = os.environ.get("ALERT_SEVERITY_LEVELS", "WARNING,ERROR,CRITICAL")
 ALERT_SEVERITY_LEVELS = [level.strip().upper() for level in ALERT_SEVERITY_LEVELS_STR.split(',') if level.strip()]
 RESTART_COUNT_THRESHOLD = int(os.environ.get("RESTART_COUNT_THRESHOLD", 5))
+DB_PATH = os.environ.get("DB_PATH", "/data/agent_stats.db")
+STATS_UPDATE_INTERVAL_SECONDS = int(os.environ.get("STATS_UPDATE_INTERVAL_SECONDS", 300))
+
 
 try:
     HCM_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -59,8 +64,67 @@ if not GEMINI_API_KEY: logging.error("GEMINI_API_KEY is not set!"); exit(1)
 genai.configure(api_key=GEMINI_API_KEY)
 gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
 
+# --- Logic Database ---
+gemini_calls_counter = 0
+telegram_alerts_counter = 0
+db_lock = threading.Lock()
+
+def init_db():
+    db_dir = os.path.dirname(DB_PATH)
+    if not os.path.exists(db_dir):
+        try: os.makedirs(db_dir); logging.info(f"Created directory for database: {db_dir}")
+        except OSError as e: logging.error(f"Could not create directory {db_dir}: {e}"); return False
+    try:
+        with db_lock:
+            conn = sqlite3.connect(DB_PATH, timeout=10); cursor = conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS incidents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, pod_key TEXT NOT NULL,
+                    severity TEXT NOT NULL, summary TEXT, initial_reasons TEXT, k8s_context TEXT, sample_logs TEXT ) ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS daily_stats (
+                    date TEXT PRIMARY KEY, gemini_calls INTEGER DEFAULT 0,
+                    telegram_alerts INTEGER DEFAULT 0, incident_count INTEGER DEFAULT 0 ) ''')
+            conn.commit(); conn.close(); logging.info(f"Database initialized successfully at {DB_PATH}"); return True
+    except sqlite3.Error as e: logging.error(f"Database error during initialization: {e}"); return False
+    except Exception as e: logging.error(f"Unexpected error during DB initialization: {e}", exc_info=True); return False
+
+def record_incident(pod_key, severity, summary, initial_reasons, k8s_context, sample_logs):
+    timestamp_str = datetime.now(timezone.utc).isoformat()
+    try:
+        with db_lock:
+            conn = sqlite3.connect(DB_PATH, timeout=10); cursor = conn.cursor()
+            cursor.execute(''' INSERT INTO incidents (timestamp, pod_key, severity, summary, initial_reasons, k8s_context, sample_logs)
+                                VALUES (?, ?, ?, ?, ?, ?, ?) ''',
+                            (timestamp_str, pod_key, severity, summary, initial_reasons, k8s_context, sample_logs))
+            today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+            cursor.execute(''' INSERT INTO daily_stats (date, incident_count) VALUES (?, 1)
+                                ON CONFLICT(date) DO UPDATE SET incident_count = incident_count + 1 ''', (today_str,))
+            conn.commit(); conn.close(); logging.info(f"Recorded incident for {pod_key} with severity {severity}")
+    except sqlite3.Error as e: logging.error(f"Database error recording incident for {pod_key}: {e}")
+    except Exception as e: logging.error(f"Unexpected error recording incident for {pod_key}: {e}", exc_info=True)
+
+def update_daily_stats():
+    global gemini_calls_counter, telegram_alerts_counter
+    if gemini_calls_counter == 0 and telegram_alerts_counter == 0: return
+    today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    calls_to_add = gemini_calls_counter; alerts_to_add = telegram_alerts_counter
+    try:
+        with db_lock:
+            conn = sqlite3.connect(DB_PATH, timeout=10); cursor = conn.cursor()
+            cursor.execute('INSERT OR IGNORE INTO daily_stats (date) VALUES (?)', (today_str,))
+            cursor.execute(''' UPDATE daily_stats SET gemini_calls = gemini_calls + ?, telegram_alerts = telegram_alerts + ?
+                                WHERE date = ? ''', (calls_to_add, alerts_to_add, today_str))
+            conn.commit(); conn.close()
+            logging.info(f"Updated daily stats for {today_str}: +{calls_to_add} Gemini calls, +{alerts_to_add} Telegram alerts.")
+            gemini_calls_counter = 0; telegram_alerts_counter = 0
+    except sqlite3.Error as e: logging.error(f"Database error updating daily stats: {e}")
+    except Exception as e: logging.error(f"Unexpected error updating daily stats: {e}", exc_info=True)
+
+def periodic_stat_update():
+    while True: time.sleep(STATS_UPDATE_INTERVAL_SECONDS); update_daily_stats()
+
 # --- Các hàm lấy thông tin Kubernetes ---
-# (Giữ nguyên: get_pod_info, get_node_info, get_pod_events, format_k8s_context)
 def get_pod_info(namespace, pod_name):
     try:
         pod = k8s_core_v1.read_namespaced_pod(name=pod_name, namespace=namespace)
@@ -130,47 +194,25 @@ def format_k8s_context(pod_info, node_info, pod_events):
 
 # --- HÀM MỚI: Quét Loki tìm log đáng ngờ ---
 def scan_loki_for_suspicious_logs(start_time, end_time):
-    """Quét Loki tìm các log đạt ngưỡng LOKI_SCAN_MIN_LEVEL."""
     loki_api_endpoint = f"{LOKI_URL}/loki/api/v1/query_range"
     if not K8S_NAMESPACES: logging.error("No namespaces configured."); return {}
-
     log_levels_all = ["DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"]
     scan_level_index = -1
     try: scan_level_index = log_levels_all.index(LOKI_SCAN_MIN_LEVEL.upper())
     except ValueError: logging.warning(f"Invalid LOKI_SCAN_MIN_LEVEL: {LOKI_SCAN_MIN_LEVEL}. Defaulting to WARNING."); scan_level_index = log_levels_all.index("WARNING")
     levels_to_scan = log_levels_all[scan_level_index:]
-
     namespace_regex = "|".join(K8S_NAMESPACES)
-    # --- BẮT ĐẦU THAY ĐỔI: Sửa lại LogQL query ---
-    # Tạo regex pattern: (?i)(WORD1|WORD2|...)
-    # Bao gồm các level log cần quét và các từ khóa lỗi phổ biến
-    keywords_to_find = levels_to_scan + ["fail", "crash", "exception", "panic", "fatal"] # Bỏ "error" vì nó thường trùng với level ERROR
-    # Escape các ký tự đặc biệt trong keywords nếu cần (ví dụ nếu có dấu ngoặc)
+    keywords_to_find = levels_to_scan + ["fail", "crash", "exception", "panic", "fatal"]
     escaped_keywords = [re.escape(k) for k in keywords_to_find]
     regex_pattern = "(?i)(" + "|".join(escaped_keywords) + ")"
-
-    # Query: Tìm log trong namespace khớp với regex pattern
-    # Sử dụng `|~` để lọc dòng log chứa các từ khóa/level
     logql_query = f'{{namespace=~"{namespace_regex}"}} |~ `{regex_pattern}`'
-    # --- KẾT THÚC THAY ĐỔI ---
-
     query_limit_scan = 2000
-
-    params = {
-        'query': logql_query,
-        'start': int(start_time.timestamp() * 1e9),
-        'end': int(end_time.timestamp() * 1e9),
-        'limit': query_limit_scan,
-        'direction': 'forward'
-    }
+    params = {'query': logql_query,'start': int(start_time.timestamp() * 1e9),'end': int(end_time.timestamp() * 1e9),'limit': query_limit_scan,'direction': 'forward'}
     logging.info(f"Scanning Loki for suspicious logs (Level >= {LOKI_SCAN_MIN_LEVEL} or keywords): {logql_query[:200]}...")
     suspicious_logs_by_pod = {}
-
     try:
         headers = {'Accept': 'application/json'}
-        response = requests.get(loki_api_endpoint, params=params, headers=headers, timeout=60)
-        response.raise_for_status() # Sẽ ném lỗi nếu có 400 Bad Request
-        data = response.json()
+        response = requests.get(loki_api_endpoint, params=params, headers=headers, timeout=60); response.raise_for_status(); data = response.json()
         if 'data' in data and 'result' in data['data']:
             count = 0
             for stream in data['data']['result']:
@@ -182,24 +224,18 @@ def scan_loki_for_suspicious_logs(start_time, end_time):
                     log_entry = {"timestamp": datetime.fromtimestamp(int(timestamp_ns) / 1e9, tz=timezone.utc), "message": log_line.strip(), "labels": labels}
                     suspicious_logs_by_pod[pod_key].append(log_entry); count += 1
             logging.info(f"Loki scan found {count} suspicious log entries across {len(suspicious_logs_by_pod)} pods.")
-        else:
-            logging.info("Loki scan found no suspicious log entries.")
+        else: logging.info("Loki scan found no suspicious log entries.")
         return suspicious_logs_by_pod
     except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 400:
-                error_detail = e.response.text[:500]
-                logging.error(f"Error scanning Loki (400 Bad Request): Invalid LogQL query? Query: '{logql_query}'. Loki Response: {error_detail}")
-        else:
-                logging.error(f"Error scanning Loki (HTTP Error {e.response.status_code}): {e}")
+        if e.response.status_code == 400: error_detail = e.response.text[:500]; logging.error(f"Error scanning Loki (400 Bad Request): Invalid LogQL query? Query: '{logql_query}'. Loki Response: {error_detail}")
+        else: logging.error(f"Error scanning Loki (HTTP Error {e.response.status_code}): {e}")
         return {}
     except requests.exceptions.RequestException as e: logging.error(f"Error scanning Loki: {e}"); return {}
     except json.JSONDecodeError as e: logging.error(f"Error decoding Loki scan response: {e}"); return {}
     except Exception as e: logging.error(f"Unexpected error during Loki scan: {e}", exc_info=True); return {}
 
-
 # --- HÀM MỚI: Quét Kubernetes tìm Pod có vấn đề ---
 def scan_kubernetes_for_issues():
-    """Quét các namespace được cấu hình để tìm Pod có dấu hiệu bất thường."""
     problematic_pods = {}
     logging.info(f"Scanning Kubernetes namespaces {K8S_NAMESPACES_STR} for problematic pods...")
     for ns in K8S_NAMESPACES:
@@ -226,7 +262,6 @@ def scan_kubernetes_for_issues():
     logging.info(f"Finished K8s scan. Found {len(problematic_pods)} potentially problematic pods from K8s state.")
     return problematic_pods
 
-
 # --- Hàm Query Loki cho pod cụ thể ---
 def query_loki_for_pod(namespace, pod_name, start_time, end_time):
     loki_api_endpoint = f"{LOKI_URL}/loki/api/v1/query_range"
@@ -245,7 +280,6 @@ def query_loki_for_pod(namespace, pod_name, start_time, end_time):
     except requests.exceptions.RequestException as e: logging.error(f"Error querying Loki for pod '{namespace}/{pod_name}': {e}"); return []
     except json.JSONDecodeError as e: logging.error(f"Error decoding Loki JSON response for pod '{namespace}/{pod_name}': {e}"); return []
     except Exception as e: logging.error(f"Unexpected error querying Loki for pod '{namespace}/{pod_name}': {e}", exc_info=True); return []
-
 
 # --- Hàm tiền xử lý và lọc log ---
 def preprocess_and_filter(log_entries):
@@ -267,23 +301,20 @@ def preprocess_and_filter(log_entries):
     logging.info(f"Filtered {len(log_entries)} logs down to {len(filtered_logs)} relevant logs (Scan Level: {LOKI_SCAN_MIN_LEVEL}).")
     return filtered_logs
 
-
 # --- Hàm tương tác với Gemini ---
 def analyze_with_gemini(log_batch, k8s_context=""):
+    global gemini_calls_counter; gemini_calls_counter += 1
     if not log_batch and not k8s_context: logging.warning("analyze_with_gemini called with no logs and no context. Skipping."); return None
     first_log_namespace = "N/A"; pod_name_in_log = "N/A"
     if log_batch:
             first_log_namespace = log_batch[0].get('labels', {}).get('namespace', 'unknown')
             pod_name_in_log = log_batch[0].get('labels', {}).get('pod', 'unknown_pod')
     elif k8s_context:
-            match_ns = re.search(r"Pod: (.*?)/", k8s_context)
-            match_pod = re.search(r"Pod: .*?/(.*?)\n", k8s_context)
+            match_ns = re.search(r"Pod: (.*?)/", k8s_context); match_pod = re.search(r"Pod: .*?/(.*?)\n", k8s_context)
             if match_ns: first_log_namespace = match_ns.group(1)
             if match_pod: pod_name_in_log = match_pod.group(1)
-
     log_text = "N/A"
     if log_batch: log_text = "\n".join([f"[{entry['timestamp'].isoformat()}] {entry.get('labels', {}).get('pod', 'unknown_pod')}: {entry['message']}" for entry in log_batch])
-
     prompt = f"""
     Phân tích tình huống của pod Kubernetes '{first_log_namespace}/{pod_name_in_log}'.
     **Ưu tiên xem xét ngữ cảnh Kubernetes** được cung cấp dưới đây vì nó có thể là lý do chính bạn được gọi.
@@ -317,9 +348,9 @@ def analyze_with_gemini(log_batch, k8s_context=""):
         except json.JSONDecodeError as json_err: logging.warning(f"Failed to decode Gemini response as JSON: {json_err}. Raw response: {response_text}"); severity = "WARNING"; summary_vi = f"Phản hồi Gemini không phải JSON hợp lệ ({json_err}): " + response_text[:200]; return {"severity": severity, "summary": summary_vi}
     except Exception as e: logging.error(f"Error calling Gemini API: {e}", exc_info=True); return None
 
-
 # --- Hàm gửi cảnh báo Telegram ---
 def send_telegram_alert(message):
+    global telegram_alerts_counter; telegram_alerts_counter += 1
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID: logging.warning("Telegram Bot Token or Chat ID is not configured. Skipping alert."); return
     telegram_api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"; max_len = 4096; truncated_message = message[:max_len-50] + "..." if len(message) > max_len else message
     payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': truncated_message, 'parse_mode': 'Markdown'}
@@ -327,121 +358,61 @@ def send_telegram_alert(message):
     except requests.exceptions.RequestException as e: logging.error(f"Error sending Telegram alert: {e}");
     except Exception as e: logging.error(f"An unexpected error occurred during Telegram send: {e}", exc_info=True)
 
-
 # --- Vòng lặp chính MỚI của Agent (Quét Song Song) ---
 def main_loop():
-    """
-    Vòng lặp chính: Quét K8s và Loki song song, gom kết quả, phân tích, gửi cảnh báo.
-    """
-    recently_alerted_pods = {} # Format: {"ns/pod": alert_timestamp}
-
+    recently_alerted_pods = {}
     while True:
         start_cycle_time = datetime.now(timezone.utc)
         logging.info("--- Starting new monitoring cycle (Parallel Scan) ---")
-
-        # 1. Quét K8s tìm pod có vấn đề về trạng thái/restart
-        k8s_problem_pods = scan_kubernetes_for_issues() # Trả về dict {"ns/pod": {"reason": ...}}
-
-        # 2. Quét Loki tìm log đáng ngờ trong khoảng thời gian gần nhất
-        loki_scan_end_time = start_cycle_time
-        loki_scan_start_time = loki_scan_end_time - timedelta(minutes=LOKI_SCAN_RANGE_MINUTES)
-        loki_suspicious_logs = scan_loki_for_suspicious_logs(loki_scan_start_time, loki_scan_end_time) # Trả về dict {"ns/pod": [log_entry,...]}
-
-        # 3. Gom danh sách các pod cần điều tra (từ K8s hoặc Loki)
-        pods_to_investigate = {} # Format: {"ns/pod": {"reason": "...", "logs": [...]}}
-        # Thêm từ K8s scan
+        k8s_problem_pods = scan_kubernetes_for_issues()
+        loki_scan_end_time = start_cycle_time; loki_scan_start_time = loki_scan_end_time - timedelta(minutes=LOKI_SCAN_RANGE_MINUTES)
+        loki_suspicious_logs = scan_loki_for_suspicious_logs(loki_scan_start_time, loki_scan_end_time)
+        pods_to_investigate = {}
         for pod_key, data in k8s_problem_pods.items():
             if pod_key not in pods_to_investigate: pods_to_investigate[pod_key] = {"reason": [], "logs": []}
             pods_to_investigate[pod_key]["reason"].append(data["reason"])
-
-        # Thêm từ Loki scan
         for pod_key, logs in loki_suspicious_logs.items():
                 if pod_key not in pods_to_investigate: pods_to_investigate[pod_key] = {"reason": [], "logs": []}
                 pods_to_investigate[pod_key]["reason"].append(f"Loki: Phát hiện {len(logs)} log đáng ngờ (>= {LOKI_SCAN_MIN_LEVEL})")
-                pods_to_investigate[pod_key]["logs"].extend(logs) # Thêm các log đáng ngờ đã tìm thấy
-
+                pods_to_investigate[pod_key]["logs"].extend(logs)
         logging.info(f"Total pods to investigate this cycle: {len(pods_to_investigate)}")
-
-        # 4. Xử lý từng pod cần điều tra
         for pod_key, data in pods_to_investigate.items():
-            namespace, pod_name = pod_key.split('/', 1)
-            initial_reasons = "; ".join(data["reason"]) # Lý do phát hiện ban đầu
-            suspicious_logs_found = data["logs"] # Log đáng ngờ tìm thấy từ Loki scan
-
-            # Kiểm tra cooldown
+            namespace, pod_name = pod_key.split('/', 1); initial_reasons = "; ".join(data["reason"]); suspicious_logs_found = data["logs"]
             now_utc = datetime.now(timezone.utc)
             if pod_key in recently_alerted_pods:
-                last_alert_time = recently_alerted_pods[pod_key]
-                cooldown_duration = timedelta(minutes=30) # Cooldown 30 phút
-                if now_utc < last_alert_time + cooldown_duration:
-                    logging.info(f"Pod {pod_key} is in cooldown period. Skipping analysis.")
-                    continue
-                else:
-                    # Hết cooldown, xóa khỏi dict
-                    del recently_alerted_pods[pod_key]
-
+                last_alert_time = recently_alerted_pods[pod_key]; cooldown_duration = timedelta(minutes=30)
+                if now_utc < last_alert_time + cooldown_duration: logging.info(f"Pod {pod_key} is in cooldown period. Skipping analysis."); continue
+                else: del recently_alerted_pods[pod_key]
             logging.info(f"Investigating pod: {pod_key} (Initial Reasons: {initial_reasons})")
-
-            # 5. Lấy ngữ cảnh K8s chi tiết
-            pod_info = get_pod_info(namespace, pod_name)
-            node_info = None
-            pod_events = []
-            if pod_info:
-                node_info = get_node_info(pod_info.get('node_name'))
-                pod_events = get_pod_events(namespace, pod_name, since_minutes=LOKI_DETAIL_LOG_RANGE_MINUTES + 5)
+            pod_info = get_pod_info(namespace, pod_name); node_info = None; pod_events = []
+            if pod_info: node_info = get_node_info(pod_info.get('node_name')); pod_events = get_pod_events(namespace, pod_name, since_minutes=LOKI_DETAIL_LOG_RANGE_MINUTES + 5)
             k8s_context_str = format_k8s_context(pod_info, node_info, pod_events)
-
-            # 6. Lấy log chi tiết hơn nếu cần (hoặc dùng log đã có)
-            logs_for_analysis = suspicious_logs_found # Ưu tiên dùng log đáng ngờ đã tìm thấy
+            logs_for_analysis = suspicious_logs_found
             if not logs_for_analysis:
-                # Nếu không có log đáng ngờ từ scan, lấy log gần đây để có thêm thông tin
-                log_end_time = datetime.now(timezone.utc)
-                log_start_time = log_end_time - timedelta(minutes=LOKI_DETAIL_LOG_RANGE_MINUTES)
+                log_end_time = datetime.now(timezone.utc); log_start_time = log_end_time - timedelta(minutes=LOKI_DETAIL_LOG_RANGE_MINUTES)
                 detailed_logs = query_loki_for_pod(namespace, pod_name, log_start_time, log_end_time)
-                # Lọc log chi tiết này (ví dụ chỉ lấy INFO trở lên nếu MIN_LOG_LEVEL là INFO)
-                logs_for_analysis = preprocess_and_filter(detailed_logs) # Áp dụng bộ lọc chung
-
-
-            # 7. Phân tích với Gemini
+                logs_for_analysis = preprocess_and_filter(detailed_logs)
             analysis_result = analyze_with_gemini(logs_for_analysis, k8s_context_str)
-
-            # 8. Xử lý kết quả và gửi cảnh báo
             if analysis_result:
-                severity = analysis_result.get("severity", "UNKNOWN").upper()
-                summary = analysis_result.get("summary", "N/A")
+                severity = analysis_result.get("severity", "UNKNOWN").upper(); summary = analysis_result.get("summary", "N/A")
                 logging.info(f"Gemini analysis result for '{pod_key}': Severity={severity}, Summary={summary}")
-
                 if severity in ALERT_SEVERITY_LEVELS:
-                    sample_logs = "\n".join([f"- `{log['message'][:150]}`" for log in logs_for_analysis[:5]]) # Lấy 5 log mẫu
-
-                    alert_time_hcm = datetime.now(HCM_TZ)
-                    time_format = '%Y-%m-%d %H:%M:%S %Z'
-
-                    alert_message = f"""🚨 *Cảnh báo K8s/Log (Pod: {pod_key})* 🚨
-*Mức độ:* `{severity}`
-*Tóm tắt:* {summary}
-*Lý do phát hiện ban đầu:* {initial_reasons}
-*Thời gian phát hiện:* `{alert_time_hcm.strftime(time_format)}`
-*Log mẫu (nếu có):*
-{sample_logs if sample_logs else "- Không có log mẫu liên quan."}
-
-_Vui lòng kiểm tra trạng thái pod/node/events và log trên Loki để biết thêm chi tiết._"""
+                    sample_logs = "\n".join([f"- `{log['message'][:150]}`" for log in logs_for_analysis[:5]])
+                    alert_time_hcm = datetime.now(HCM_TZ); time_format = '%Y-%m-%d %H:%M:%S %Z'
+                    alert_message = f"""🚨 *Cảnh báo K8s/Log (Pod: {pod_key})* 🚨\n*Mức độ:* `{severity}`\n*Tóm tắt:* {summary}\n*Lý do phát hiện ban đầu:* {initial_reasons}\n*Thời gian phát hiện:* `{alert_time_hcm.strftime(time_format)}`\n*Log mẫu (nếu có):*\n{sample_logs if sample_logs else "- Không có log mẫu liên quan."}\n\n_Vui lòng kiểm tra trạng thái pod/node/events và log trên Loki để biết thêm chi tiết._"""
                     send_telegram_alert(alert_message)
-                    # Cập nhật thời gian cảnh báo cuối cùng cho pod này
+                    record_incident(pod_key, severity, summary, initial_reasons, k8s_context_str, sample_logs if sample_logs else "-")
                     recently_alerted_pods[pod_key] = now_utc
-            else:
-                logging.warning(f"Gemini analysis failed or returned no result for pod '{pod_key}'.")
-
-            time.sleep(5) # Nghỉ giữa các pod
-
-        # Ngủ đến hết chu kỳ
+            else: logging.warning(f"Gemini analysis failed or returned no result for pod '{pod_key}'.")
+            time.sleep(5)
         cycle_duration = (datetime.now(timezone.utc) - start_cycle_time).total_seconds()
         sleep_time = max(0, SCAN_INTERVAL_SECONDS - cycle_duration)
         logging.info(f"--- Cycle finished in {cycle_duration:.2f}s. Sleeping for {sleep_time:.2f} seconds... ---")
         time.sleep(sleep_time)
 
-
 if __name__ == "__main__":
+    if not init_db(): logging.error("Failed to initialize database. Exiting."); exit(1)
+    stats_thread = threading.Thread(target=periodic_stat_update, daemon=True); stats_thread.start(); logging.info("Started periodic stats update thread.")
     logging.info(f"Starting Kubernetes Log Monitoring Agent (Parallel Scan Logic) for namespaces: {K8S_NAMESPACES_STR}")
     logging.info(f"Loki scan minimum level: {LOKI_SCAN_MIN_LEVEL}")
     logging.info(f"Alerting for severity levels: {ALERT_SEVERITY_LEVELS_STR}")
@@ -450,5 +421,5 @@ if __name__ == "__main__":
     if not all([LOKI_URL, GEMINI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID]): logging.error("One or more required environment variables are missing. Ensure they are set. Exiting."); exit(1)
     try: main_loop()
     except KeyboardInterrupt: logging.info("Agent stopped by user.")
-    except Exception as e: logging.error(f"Unhandled exception in main loop: {e}", exc_info=True)
+    finally: logging.info("Performing final stats update before exiting..."); update_daily_stats(); logging.info("Agent shutdown complete.")
 

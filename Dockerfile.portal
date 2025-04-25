@@ -1,0 +1,35 @@
+# Sử dụng base image Python slim
+FROM python:3.10-slim
+
+# Thiết lập thư mục làm việc
+WORKDIR /portal
+
+# Cài đặt các gói cần thiết cho timezone data
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata && rm -rf /var/lib/apt/lists/*
+
+# Sao chép file requirements
+COPY portal/requirements.txt .
+
+# Cài đặt thư viện Python
+RUN pip install --no-cache-dir --prefer-binary -r requirements.txt
+
+# Sao chép code ứng dụng Flask và templates
+COPY ./portal /portal
+
+# Mở port 5000 mà Flask sẽ chạy
+EXPOSE 5000
+
+# Tạo thư mục /data để mount PV (mặc dù portal chỉ đọc)
+# Cấp quyền cho user không phải root
+RUN mkdir /data && chown 1001:1001 /data
+
+# Chỉ định user không phải root
+USER 1001
+
+# Lệnh chạy ứng dụng Flask
+# Sử dụng Gunicorn làm production server thay vì Flask dev server
+# Cần thêm gunicorn vào portal/requirements.txt
+# CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]
+
+# Hoặc chạy trực tiếp Flask cho đơn giản (không khuyến khích cho production)
+CMD ["python", "app.py"]
