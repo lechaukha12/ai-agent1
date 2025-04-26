@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gemini-local # Tên deployment cho service AI local
+  namespace: kube-observability
+  labels:
+    app: gemini-local
+spec:
+  replicas: 1 # Bắt đầu với 1 replica
+  selector:
+    matchLabels:
+      app: gemini-local
+  template:
+    metadata:
+      labels:
+        app: gemini-local
+    spec:
+      # Không cần service account đặc biệt
+      containers:
+      - name: model-server
+        # !!! THAY THẾ BẰNG TÊN IMAGE GEMINI-LOCAL CỦA BẠN !!!
+        image: codebuild.alfinac.com:4444/library/gemini-local-service:v1.0.5
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+        env:
+        # Có thể thêm biến môi trường nếu cần, ví dụ đường dẫn model
+        - name: MODEL_PATH
+          value: "/app/local_model"
+        # Thêm readiness/liveness probe để K8s biết khi nào service sẵn sàng
+        readinessProbe:
+          httpGet:
+            path: /healthz # Endpoint kiểm tra sức khỏe
+            port: 5000
+          initialDelaySeconds: 30 # Chờ 30s để model load xong
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 5000
+          initialDelaySeconds: 60
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 5
+        # --- QUAN TRỌNG: Cấp phát đủ tài nguyên ---
+        resources:
+          requests:
+            cpu: "1"    # Yêu cầu 1 CPU core
+            memory: "2Gi" # Yêu cầu 2GB RAM
+          limits:
+            cpu: "2"    # Giới hạn 2 CPU cores
+            memory: "4Gi" # Giới hạn 4GB RAM
+      # Có thể thêm nodeSelector hoặc affinity để chạy trên node có tài nguyên tốt
+      # nodeSelector:
+      #   hardware: high-memory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gemini-local-svc # Tên service nội bộ
+  namespace: kube-observability
+  labels:
+    app: gemini-local
+spec:
+  selector:
+    app: gemini-local # Chọn pod của deployment gemini-local
+  ports:
+    - protocol: TCP
+      port: 5000 # Port của service
+      targetPort: 5000 # Port container đang chạy
+  type: ClusterIP # Chỉ truy cập được trong cluster
+

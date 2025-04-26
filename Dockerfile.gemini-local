@@ -1,0 +1,46 @@
+# Sử dụng base image Python slim
+FROM python:3.10-slim
+
+# Thiết lập thư mục làm việc
+WORKDIR /app
+
+# Cài đặt git để tải model nếu cần
+RUN apt-get update && apt-get install -y --no-install-recommends git git-lfs && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Sao chép requirements trước
+COPY gemini_local/requirements.txt .
+
+# Cài đặt thư viện
+RUN pip install --no-cache-dir --prefer-binary -r requirements.txt
+
+# Tải model (chạy với root)
+ARG MODEL_NAME=google/flan-t5-small
+ARG MODEL_PATH=/app/local_model
+RUN python -c "from transformers import AutoModelForSeq2SeqLM, AutoTokenizer; \
+    import os; \
+    model_name = os.getenv('MODEL_NAME', '${MODEL_NAME}'); \
+    model_path = os.getenv('MODEL_PATH', '${MODEL_PATH}'); \
+    print(f'Downloading model {model_name} to {model_path}...'); \
+    os.makedirs(model_path, exist_ok=True); \
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_name); \
+    tokenizer = AutoTokenizer.from_pretrained(model_name); \
+    model.save_pretrained(model_path); \
+    tokenizer.save_pretrained(model_path); \
+    print('Model download complete.')"
+
+# Sao chép code ứng dụng Flask
+COPY ./gemini_local /app
+
+# Cấp quyền cho user không phải root
+RUN chown -R 1001:1001 /app
+USER 1001
+
+# Mở port Flask
+EXPOSE 5000
+
+# Chạy bằng Gunicorn (khuyến nghị)
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "2", "--timeout", "120", "app:app"]
+# Hoặc chạy Flask dev server (chỉ để test)
+# CMD ["python", "app.py"]

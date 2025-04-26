@@ -1,0 +1,5 @@
+Flask
+transformers
+torch
+sentencepiece
+gunicorn # Nên dùng cho production
