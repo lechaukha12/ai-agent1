@@ -2,21 +2,28 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: k8s-log-agent-config
-  namespace: kube-observability
+  namespace: kube-observability # Đảm bảo đúng namespace
 data:
-  LOKI_URL: "http://loki-loki-distributed-query-frontend:3100"
+  LOKI_URL: "http://loki-loki-distributed-query-frontend:3100" # !!! THAY THẾ BẰNG URL LOKI CỦA BẠN !!!
+  # Bao lâu quét K8s/Loki 1 lần (giây)
   SCAN_INTERVAL_SECONDS: "30"
+  # Khoảng thời gian quét log Loki tìm vấn đề (phút)
   LOKI_SCAN_RANGE_MINUTES: "1"
+  # Khoảng thời gian lấy log chi tiết cho pod có vấn đề (phút)
   LOKI_DETAIL_LOG_RANGE_MINUTES: "30"
-  LOKI_QUERY_LIMIT: "500"
-  K8S_NAMESPACES: "kube-system,app-infra,alfinac-bee-logistics"
+  LOKI_QUERY_LIMIT: "500" # Giới hạn log cho mỗi pod query
+  K8S_NAMESPACES: "ingress-nginx,app-infra,alfinac-bee-logistics" # Danh sách namespace cần giám sát
+  # Mức log tối thiểu để Loki scan tìm vấn đề (WARNING, ERROR, ...)
   LOKI_SCAN_MIN_LEVEL: "WARNING"
-  ALERT_SEVERITY_LEVELS: "WARNING,ERROR,CRITICAL"
-  RESTART_COUNT_THRESHOLD: "5"
-  # GEMINI_MODEL_NAME: "gemini-1.5-flash" # Có thể bỏ hoặc giữ nếu muốn fallback
-  DB_PATH: "/data/agent_stats.db"
-  STATS_UPDATE_INTERVAL_SECONDS: "300"
-  # --- THÊM CẤU HÌNH MỚI ---
-  # Để trống hoặc không đặt biến này nếu muốn dùng Gemini API thật
+  ALERT_SEVERITY_LEVELS: "WARNING,ERROR,CRITICAL" # Các mức độ sẽ gửi cảnh báo
+  RESTART_COUNT_THRESHOLD: "5" # Số lần restart để coi là bất thường
+  GEMINI_MODEL_NAME: "gemini-1.5-flash" # Vẫn cần nếu dùng Gemini thật
+  DB_PATH: "/data/agent_stats.db" # Đường dẫn lưu file DB trên PV
+  STATS_UPDATE_INTERVAL_SECONDS: "300" # Bao lâu cập nhật stats vào DB
+  # URL của service AI local (vẫn cần nếu USE_LOCAL_MODEL là true)
   LOCAL_GEMINI_ENDPOINT: "http://gemini-local-svc.kube-observability.svc.cluster.local:5000/generate"
-  # --- KẾT THÚC THÊM CẤU HÌNH MỚI ---
+  # --- CÔNG TẮC ---
+  # Đặt là "true" để dùng LOCAL_GEMINI_ENDPOINT
+  # Đặt là "false" (hoặc xóa dòng này) để dùng Gemini API thật (cần GEMINI_API_KEY trong secret)
+  USE_LOCAL_MODEL: "true"
+  # --- KẾT THÚC CÔNG TẮC ---

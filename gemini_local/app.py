@@ -1,6 +1,7 @@
 import os
 import logging
 from flask import Flask, request, jsonify
+import re # Thêm import re
 try:
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
     import torch
@@ -29,8 +30,7 @@ try:
     logging.info(f"Local model loaded successfully onto device: {DEVICE}")
 except Exception as e:
     logging.error(f"Failed to load model: {e}", exc_info=True)
-    # Có thể exit hoặc để Flask chạy nhưng trả lỗi 500 ở endpoint
-    # exit(1)
+    # Flask vẫn chạy nhưng sẽ trả lỗi 503 ở healthz
 
 @app.route('/healthz')
 def healthz():
@@ -68,29 +68,27 @@ def generate_text():
 
         # Generate output
         with torch.no_grad():
-                # Điều chỉnh tham số generation nếu cần
-                outputs = model.generate(**inputs, max_new_tokens=150, num_beams=2, early_stopping=True) # Thử dùng beam search
+                outputs = model.generate(**inputs, max_new_tokens=150, num_beams=2, early_stopping=True)
 
         # Decode output
         response_text = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
         logging.info(f"Local model raw response: {response_text}")
 
-        # Parse JSON (Cố gắng parse, nếu lỗi thì trả về lỗi hoặc text thô)
+        # Parse JSON
         cleaned_response_text = response_text
         if cleaned_response_text.startswith("```json"): cleaned_response_text = cleaned_response_text.strip("```json").strip("`").strip()
         elif cleaned_response_text.startswith("```"): cleaned_response_text = cleaned_response_text.strip("```").strip()
+        # Dùng re.search đã import
         match = re.search(r'\{.*\}', cleaned_response_text, re.DOTALL); json_string_to_parse = match.group(0) if match else cleaned_response_text
 
         try:
             parsed_result = json.loads(json_string_to_parse)
-            # Đảm bảo có đủ key, nếu không thì thêm giá trị mặc định
-            analysis_result["severity"] = parsed_result.get("severity", "WARNING").upper() # Mặc định WARNING nếu thiếu
+            analysis_result["severity"] = parsed_result.get("severity", "WARNING").upper()
             analysis_result["summary"] = parsed_result.get("summary", "Không có tóm tắt từ model.")
             logging.info(f"Parsed local model response: {analysis_result}")
 
         except json.JSONDecodeError as json_err:
             logging.warning(f"Failed to decode local model response as JSON: {json_err}. Raw: {response_text}")
-            # Trả về lỗi hoặc cố gắng đoán
             severity = "WARNING"
             if "CRITICAL" in response_text.upper(): severity = "CRITICAL"
             elif "ERROR" in response_text.upper(): severity = "ERROR"
@@ -103,7 +101,5 @@ def generate_text():
         return jsonify({"error": f"Inference error: {e}"}), 500
 
 if __name__ == '__main__':
-    # Nên dùng Gunicorn trong production
-    # Ví dụ: gunicorn --bind 0.0.0.0:5000 --workers 2 --threads 4 app:app
-    # Chạy Flask dev server để test
+    # Chạy Flask dev server để test, production nên dùng Gunicorn
     app.run(host='0.0.0.0', port=5000, debug=False)

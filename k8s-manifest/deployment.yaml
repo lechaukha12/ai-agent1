@@ -1,49 +1,53 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: k8s-log-agent # Tên Deployment
-  namespace: kube-observability # Namespace mới
+  name: gemini-local # Giữ tên deployment
+  namespace: kube-observability
   labels:
-    app: k8s-log-agent
+    app: gemini-local
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: k8s-log-agent
+      app: gemini-local
   template:
     metadata:
       labels:
-        app: k8s-log-agent
+        app: gemini-local
     spec:
-      serviceAccountName: k8s-log-agent-sa # Sử dụng Service Account
       containers:
-      - name: agent
-        # !!! THAY THẾ BẰNG TÊN IMAGE v1.0.4 CỦA BẠN !!!
-        image: your-dockerhub-username/k8s-log-agent:v1.0.4
+      - name: model-server
+        # !!! THAY THẾ BẰNG TÊN IMAGE MỚI (DistilBERT) !!!
+        image: codebuild.alfinac.com:4444/library/gemini-local-service:v1.0.5
         imagePullPolicy: Always
-        envFrom:
-          - configMapRef:
-              name: k8s-log-agent-config
-          - secretRef:
-              name: k8s-log-agent-secret
+        ports:
+        - containerPort: 5000
         env:
-        - name: TZ
-          value: Asia/Ho_Chi_Minh # Đặt múi giờ
-        volumeMounts:
-        - name: agent-data # Tên volume mount
-          mountPath: /data   # Thư mục mount PV để lưu DB
+        - name: MODEL_PATH
+          value: "/app/local_model"
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 5000
+          initialDelaySeconds: 30 # Có thể giảm thời gian chờ load
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 5000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 5
+        # --- Điều chỉnh Resources cho DistilBERT ---
         resources:
           requests:
-            cpu: "150m"
-            memory: "256Mi"
+            cpu: "500m"  # Vẫn cần CPU khá
+            memory: "1Gi" # Yêu cầu RAM có thể thấp hơn T5
           limits:
-            cpu: "750m"
-            memory: "768Mi"
-      securityContext:
-          runAsNonRoot: true
-          runAsUser: 1001
-          fsGroup: 1001
-      volumes:
-      - name: agent-data # Tên volume
-        persistentVolumeClaim:
-          claimName: k8s-log-agent-data-pvc # Tên PVC đã tạo
+            cpu: "1"    # Giới hạn 1 CPU core
+            memory: "2Gi" # Giới hạn 2GB RAM (Theo dõi và điều chỉnh)
+      # nodeSelector:
+      #   hardware: high-memory
