@@ -6,86 +6,128 @@
     <title>K8s Log Agent Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // Script này phải chạy trước khi render body để tránh FOUC (Flash of Unstyled Content)
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark')
+        } else {
+          document.documentElement.classList.remove('dark')
+        }
+    </script>
     <style>
         body { font-family: 'Inter', sans-serif; }
         .stat-card { transition: transform 0.2s ease-in-out; }
         .stat-card:hover { transform: translateY(-5px); }
-        #loading-spinner { border-top-color: #3498db; }
+        #loading-spinner { border-top-color: #3498db; } /* Màu spinner light mode */
+        .dark #loading-spinner { border-top-color: #60a5fa; } /* Màu spinner dark mode */
         .chart-container { min-height: 300px; position: relative; }
-        /* Bỏ style cũ */
-        /* Căn chỉnh chiều rộng cột mới (4 cột) */
+        .line-clamp-2 {
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            word-break: break-word;
+        }
+        /* Căn chỉnh cột */
         #incidents-table th:nth-child(1), #incidents-table td:nth-child(1) { width: 25%; } /* Pod */
         #incidents-table th:nth-child(2), #incidents-table td:nth-child(2) { width: 15%; } /* Mức độ */
         #incidents-table th:nth-child(3), #incidents-table td:nth-child(3) { width: 30%; } /* Tóm tắt */
         #incidents-table th:nth-child(4), #incidents-table td:nth-child(4) { width: 30%; } /* Lý do */
+
+        /* Style cho nút theme */
+        #theme-toggle-button svg {
+            width: 1.25rem; /* 20px */
+            height: 1.25rem; /* 20px */
+        }
     </style>
      <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
-<body class="bg-gray-100 text-gray-800 p-4 md:p-8">
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 p-4 md:p-8 transition-colors duration-300">
     <div class="max-w-7xl mx-auto">
-        <header class="mb-8 text-center">
-            <h1 class="text-3xl md:text-4xl font-bold text-gray-900 mb-2">K8s Log Agent Dashboard</h1>
-            <p class="text-gray-600">Theo dõi sự cố và hoạt động của agent.</p>
-            <p class="text-xs text-gray-500 mt-1">Đọc dữ liệu từ: <code id="db-path" class="bg-gray-200 px-1 rounded">{{ db_path }}</code></p>
+        <header class="mb-8 text-center relative">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-2">K8s Log Agent Dashboard</h1>
+            <p class="text-gray-600 dark:text-gray-400">Theo dõi sự cố và hoạt động của agent.</p>
+            <p class="text-xs text-gray-500 dark:text-gray-500 mt-1">Đọc dữ liệu từ: <code id="db-path" class="bg-gray-200 dark:bg-gray-700 px-1 rounded">{{ db_path }}</code></p>
+            <div class="absolute top-0 right-0 mt-2 mr-2">
+                <button id="theme-toggle-button" type="button" class="text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-4 focus:ring-gray-200 dark:focus:ring-gray-700 rounded-lg text-sm p-2.5 transition-colors duration-200">
+                    <svg id="theme-toggle-dark-icon" class="hidden" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path></svg>
+                    <svg id="theme-toggle-light-icon" class="hidden" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm-.707 7.072l.707-.707a1 1 0 011.414 1.414l-.707.707a1 1 0 01-1.414-1.414zM13 17a1 1 0 100-2h-1a1 1 0 100 2h1zm-9-8a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1z" fill-rule="evenodd" clip-rule="evenodd"></path></svg>
+                    <svg id="theme-toggle-system-icon" class="hidden" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"></path></svg>
+                </button>
+            </div>
         </header>
-
-        <div id="loading-spinner" class="hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 border-4 border-gray-300 border-t-4 rounded-full w-12 h-12 animate-spin z-50"></div>
+        <div id="loading-spinner" class="hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 border-4 border-gray-300 dark:border-gray-600 border-t-4 rounded-full w-12 h-12 animate-spin z-50"></div>
         <div id="loading-overlay" class="hidden fixed inset-0 bg-gray-500 bg-opacity-50 z-40"></div>
 
 
         <section class="mb-8">
-            <h2 class="text-2xl font-semibold mb-4 text-gray-800">Tổng quan Hôm Nay (<span id="today-date"></span>)</h2>
+            <h2 class="text-2xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Tổng quan Hôm Nay (<span id="today-date"></span>)</h2>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div class="stat-card bg-white p-6 rounded-lg shadow-md border border-gray-200">
-                    <h3 class="text-lg font-semibold text-red-600 mb-2">Sự Cố Hôm Nay</h3>
-                    <p id="total-incidents" class="text-4xl font-bold text-red-500">--</p>
+                <div class="stat-card bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
+                    <h3 class="text-lg font-semibold text-red-600 dark:text-red-400 mb-2">Sự Cố Hôm Nay</h3>
+                    <p id="total-incidents" class="text-4xl font-bold text-red-500 dark:text-red-400">--</p>
                 </div>
-                <div class="stat-card bg-white p-6 rounded-lg shadow-md border border-gray-200">
-                    <h3 class="text-lg font-semibold text-blue-600 mb-2">Lượt gọi Gemini</h3>
-                    <p id="total-gemini-calls" class="text-4xl font-bold text-blue-500">--</p>
+                <div class="stat-card bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
+                    <h3 class="text-lg font-semibold text-blue-600 dark:text-blue-400 mb-2">Lượt gọi Gemini</h3>
+                    <p id="total-gemini-calls" class="text-4xl font-bold text-blue-500 dark:text-blue-400">--</p>
                 </div>
-                <div class="stat-card bg-white p-6 rounded-lg shadow-md border border-gray-200">
-                    <h3 class="text-lg font-semibold text-green-600 mb-2">Cảnh báo Telegram</h3>
-                    <p id="total-telegram-alerts" class="text-4xl font-bold text-green-500">--</p>
+                <div class="stat-card bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
+                    <h3 class="text-lg font-semibold text-green-600 dark:text-green-400 mb-2">Cảnh báo Telegram</h3>
+                    <p id="total-telegram-alerts" class="text-4xl font-bold text-green-500 dark:text-green-400">--</p>
                 </div>
-            </div>
+                </div>
         </section>
 
-        <section class="mb-8">
-             <div>
-                <h2 class="text-2xl font-semibold mb-4 text-gray-800">Xu hướng hàng ngày (7 ngày)</h2>
-                <div class="bg-white p-4 md:p-6 rounded-lg shadow-md border border-gray-200 chart-container" id="statsChartContainer">
+        <section class="mb-8 grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div>
+                <h2 class="text-2xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Xu hướng hàng ngày (7 ngày)</h2>
+                <div class="bg-white dark:bg-gray-800 p-4 md:p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 chart-container" id="statsChartContainer">
                      <canvas id="statsChart"></canvas>
                      <p id="line-chart-error" class="text-center text-red-500 hidden mt-4">Lỗi tải dữ liệu biểu đồ đường.</p>
-                     <p id="line-chart-no-data" class="text-center text-gray-500 hidden mt-4">Chưa có đủ dữ liệu thống kê hàng ngày để vẽ biểu đồ đường.</p>
+                     <p id="line-chart-no-data" class="text-center text-gray-500 dark:text-gray-400 hidden mt-4">Chưa có đủ dữ liệu thống kê hàng ngày để vẽ biểu đồ đường.</p>
                 </div>
-            </div>
+                </div>
+             <div>
+                <h2 class="text-2xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Phân loại Sự cố (Hôm nay)</h2>
+                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 chart-container" id="severityPieChartContainer">
+                         <canvas id="severityPieChart"></canvas>
+                         <p id="severity-pie-error" class="absolute inset-0 flex items-center justify-center text-center text-red-500 hidden p-4">Lỗi tải dữ liệu.</p>
+                         <p id="severity-pie-no-data" class="absolute inset-0 flex items-center justify-center text-center text-gray-500 dark:text-gray-400 hidden p-4">Không có sự cố hôm nay.</p>
+                    </div>
+                     <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 chart-container" id="sourcePieChartContainer">
+                         <canvas id="sourcePieChart"></canvas>
+                          <p id="source-pie-error" class="absolute inset-0 flex items-center justify-center text-center text-red-500 hidden p-4">Lỗi tải dữ liệu.</p>
+                         <p id="source-pie-no-data" class="absolute inset-0 flex items-center justify-center text-center text-gray-500 dark:text-gray-400 hidden p-4">Không có sự cố hôm nay.</p>
+                    </div>
+                </div>
+                 </div>
         </section>
         <section>
             <div class="flex justify-between items-center mb-4">
-                 <h2 class="text-2xl font-semibold text-gray-800">Sự cố gần đây (Tối đa 100)</h2>
+                 <h2 class="text-2xl font-semibold text-gray-800 dark:text-gray-100">Sự cố gần đây (Tối đa 100)</h2>
                  <button id="refresh-button" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200 ease-in-out">
                      Làm mới
                  </button>
             </div>
-            <div class="bg-white rounded-lg shadow-md overflow-x-auto border border-gray-200">
-                <table id="incidents-table" class="min-w-full divide-y divide-gray-200 table-fixed">
-                    <thead class="bg-gray-50">
+             <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-x-auto border border-gray-200 dark:border-gray-700">
+                <table id="incidents-table" class="min-w-full divide-y divide-gray-200 dark:divide-gray-700 table-fixed">
+                    <thead class="bg-gray-50 dark:bg-gray-700">
                         <tr>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pod</th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Mức độ</th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tóm tắt</th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lý do phát hiện</th>
-                            </tr>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Pod</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Mức độ</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Tóm tắt</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Lý do phát hiện</th>
+                        </tr>
                     </thead>
-                    <tbody id="incidents-table-body" class="bg-white divide-y divide-gray-200">
-                        <tr><td colspan="4" class="text-center py-4 text-gray-500">Đang tải dữ liệu...</td></tr>
-                        </tbody>
+                    <tbody id="incidents-table-body" class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                        <tr><td colspan="4" class="text-center py-4 text-gray-500 dark:text-gray-400">Đang tải dữ liệu...</td></tr>
+                    </tbody>
                 </table>
             </div>
-        </section>
+             </section>
 
     </div>
 
@@ -103,17 +145,19 @@
         const lineChartErrorElem = document.getElementById('line-chart-error');
         const lineChartNoDataElem = document.getElementById('line-chart-no-data');
         let lineChartInstance = null;
-        // === THAY ĐỔI: Bỏ biến Pie Chart ===
-        // const severityPieCtx = ...
-        // const sourcePieCtx = ...
+        // Bỏ biến Pie Chart
+        // === BẮT ĐẦU THAY ĐỔI: Biến cho nút theme ===
+        const themeToggleButton = document.getElementById('theme-toggle-button');
+        const themeToggleDarkIcon = document.getElementById('theme-toggle-dark-icon');
+        const themeToggleLightIcon = document.getElementById('theme-toggle-light-icon');
+        const themeToggleSystemIcon = document.getElementById('theme-toggle-system-icon');
         // === KẾT THÚC THAY ĐỔI ===
+
 
         // === Hàm tiện ích ===
         function showLoading() { loadingSpinner.classList.remove('hidden'); loadingOverlay.classList.remove('hidden'); }
         function hideLoading() { loadingSpinner.classList.add('hidden'); loadingOverlay.classList.add('hidden'); }
-        // === THAY ĐỔI: Bỏ hàm format ngày giờ vì không dùng nữa ===
-        // function formatVietnameseDateTime(isoString) { ... }
-        // === KẾT THÚC THAY ĐỔI ===
+        // Bỏ hàm format date
         function setTodayDate() { /* ... Giữ nguyên ... */
              const today = new Date();
              const day = String(today.getDate()).padStart(2, '0');
@@ -123,24 +167,34 @@
         }
 
         // === Hàm vẽ biểu đồ (Giữ nguyên Line Chart, bỏ Pie Chart) ===
-        function renderLineChart(dailyStats) { /* ... Giữ nguyên ... */
+        function renderLineChart(dailyStats) { /* ... */
              lineChartErrorElem.classList.add('hidden'); lineChartNoDataElem.classList.add('hidden');
              if (!dailyStats || dailyStats.length < 1) { console.warn("Không đủ dữ liệu hàng ngày để vẽ biểu đồ đường."); lineChartNoDataElem.classList.remove('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; } return; }
              dailyStats.sort((a, b) => new Date(a.date) - new Date(b.date));
              const labels = dailyStats.map(stat => stat.date);
              const incidentData = dailyStats.map(stat => stat.incident_count);
-             const geminiData = dailyStats.map(stat => stat.gemini_calls);
+             const geminiData = dailyStats.map(stat => stat.model_calls); // Đổi tên key
              const telegramData = dailyStats.map(stat => stat.telegram_alerts);
-             const chartData = { labels: labels, datasets: [ { label: 'Sự Cố', data: incidentData, borderColor: 'rgb(239, 68, 68)', backgroundColor: 'rgba(239, 68, 68, 0.1)', tension: 0.1, fill: true, }, { label: 'Gọi Gemini', data: geminiData, borderColor: 'rgb(59, 130, 246)', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.1, fill: true, }, { label: 'Cảnh báo Telegram', data: telegramData, borderColor: 'rgb(34, 197, 94)', backgroundColor: 'rgba(34, 197, 94, 0.1)', tension: 0.1, fill: true, } ] };
-             const chartConfig = { type: 'line', data: chartData, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }, plugins: { legend: { position: 'top', }, tooltip: { mode: 'index', intersect: false, } } } };
+             // === THAY ĐỔI: Cập nhật màu sắc cho biểu đồ theo theme ===
+             const isDarkMode = document.documentElement.classList.contains('dark');
+             const gridColor = isDarkMode ? 'rgba(107, 114, 128, 0.5)' : 'rgba(209, 213, 219, 0.5)'; // Màu lưới xám nhạt/đậm
+             const textColor = isDarkMode ? 'rgb(229, 231, 235)' : 'rgb(55, 65, 81)'; // Màu text xám đậm/nhạt
+             // === KẾT THÚC THAY ĐỔI ===
+
+             const chartData = { labels: labels, datasets: [ { label: 'Sự Cố', data: incidentData, borderColor: 'rgb(239, 68, 68)', backgroundColor: 'rgba(239, 68, 68, 0.1)', tension: 0.1, fill: true, }, { label: 'Gọi Model', data: geminiData, borderColor: 'rgb(59, 130, 246)', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.1, fill: true, }, { label: 'Cảnh báo Telegram', data: telegramData, borderColor: 'rgb(34, 197, 94)', backgroundColor: 'rgba(34, 197, 94, 0.1)', tension: 0.1, fill: true, } ] };
+             const chartConfig = { type: 'line', data: chartData, options: { responsive: true, maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, ticks: { precision: 0, color: textColor }, grid: { color: gridColor } }, // Thêm màu cho trục Y
+                    x: { ticks: { color: textColor }, grid: { color: gridColor } } // Thêm màu cho trục X
+                },
+                plugins: { legend: { position: 'top', labels: { color: textColor } }, // Thêm màu cho legend
+                tooltip: { mode: 'index', intersect: false, } } } };
              if (lineChartInstance) { lineChartInstance.destroy(); }
              lineChartInstance = new Chart(lineChartCtx, chartConfig);
         }
-        // === THAY ĐỔI: Bỏ hàm renderPieChart ===
-        // function renderPieChart(...) { ... }
-        // === KẾT THÚC THAY ĐỔI ===
+        // Bỏ hàm renderPieChart
 
-        // === Hàm Fetch dữ liệu (Giữ nguyên fetchStats) ===
+        // === Hàm Fetch dữ liệu ===
         async function fetchStats() { /* ... Giữ nguyên ... */
             try {
                 const response = await fetch('/api/stats?days=1');
@@ -149,7 +203,7 @@
                 if (stats.error) { console.error("Error fetching stats:", stats.error); totalIncidentsElem.textContent = 'Lỗi'; totalGeminiCallsElem.textContent = 'Lỗi'; totalTelegramAlertsElem.textContent = 'Lỗi'; lineChartErrorElem.classList.remove('hidden'); lineChartNoDataElem.classList.add('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; } return; }
                 const todayStr = new Date().toISOString().split('T')[0];
                 const todayStats = stats.daily_stats.find(d => d.date === todayStr);
-                if (todayStats) { totalIncidentsElem.textContent = todayStats.incident_count ?? '0'; totalGeminiCallsElem.textContent = todayStats.gemini_calls ?? '0'; totalTelegramAlertsElem.textContent = todayStats.telegram_alerts ?? '0'; }
+                if (todayStats) { totalIncidentsElem.textContent = todayStats.incident_count ?? '0'; totalGeminiCallsElem.textContent = todayStats.model_calls ?? '0'; totalTelegramAlertsElem.textContent = todayStats.telegram_alerts ?? '0'; } // Đổi tên key
                 else { totalIncidentsElem.textContent = '0'; totalGeminiCallsElem.textContent = '0'; totalTelegramAlertsElem.textContent = '0'; }
                 const response7days = await fetch('/api/stats?days=7');
                 const stats7days = await response7days.json();
@@ -158,11 +212,10 @@
             } catch (error) { console.error('Error fetching stats:', error); totalIncidentsElem.textContent = 'Lỗi'; totalGeminiCallsElem.textContent = 'Lỗi'; totalTelegramAlertsElem.textContent = 'Lỗi'; lineChartErrorElem.classList.remove('hidden'); lineChartNoDataElem.classList.add('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; } }
         }
 
-        // === BẮT ĐẦU SỬA LỖI: Hàm fetchIncidents (Bỏ Pie Chart, bỏ format date) ===
         async function fetchIncidents() {
             showLoading();
             // Bỏ reset lỗi pie chart
-            incidentsTableBody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-gray-500">Đang tải dữ liệu...</td></tr>'; // Cập nhật colspan
+            incidentsTableBody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-gray-500 dark:text-gray-400">Đang tải dữ liệu...</td></tr>'; // Cập nhật colspan và dark mode
 
             try {
                 const response = await fetch('/api/incidents?limit=100');
@@ -176,30 +229,29 @@
 
                 incidentsTableBody.innerHTML = '';
 
-                // Bỏ phần tính toán cho Pie Chart
-                // const severityCounts = ...
-                // const sourceCounts = ...
-                // const today = ...
+                // Bỏ phần tính toán Pie Chart
 
                 if (incidents.length === 0) {
-                    incidentsTableBody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-gray-500">Chưa có sự cố nào được ghi nhận.</td></tr>'; // Cập nhật colspan
-                    // Bỏ phần xử lý no-data cho pie chart
+                    incidentsTableBody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-gray-500 dark:text-gray-400">Chưa có sự cố nào được ghi nhận.</td></tr>'; // Cập nhật colspan và dark mode
+                    // Bỏ phần xử lý no-data pie chart
                 } else {
                     incidents.forEach(incident => {
                         // Bỏ phần xử lý ngày cho Pie Chart
 
-                        // --- Tạo hàng cho bảng ---
                         const row = document.createElement('tr');
                         const severityUpper = incident.severity ? incident.severity.toUpperCase() : '';
-                        if (severityUpper === 'ERROR' || severityUpper === 'CRITICAL') { row.classList.add('bg-red-50'); }
-                        else if (severityUpper === 'WARNING') { row.classList.add('bg-yellow-50'); }
+                        // === THAY ĐỔI: Thêm class dark mode cho màu nền ===
+                        if (severityUpper === 'ERROR' || severityUpper === 'CRITICAL') { row.classList.add('bg-red-50', 'dark:bg-opacity-10', 'dark:bg-red-900'); }
+                        else if (severityUpper === 'WARNING') { row.classList.add('bg-yellow-50', 'dark:bg-opacity-10', 'dark:bg-yellow-900'); }
+                        // === KẾT THÚC THAY ĐỔI ===
 
-                        // Hàm tạo cell (Giữ nguyên v7)
                         const createCell = (text, allowWrap = false) => {
                             const cell = document.createElement('td');
-                            cell.className = 'px-6 py-4 text-sm text-gray-700 align-top';
+                            // === THAY ĐỔI: Thêm class dark mode cho text cell ===
+                            cell.className = 'px-6 py-4 text-sm text-gray-700 dark:text-gray-300 align-top';
+                            // === KẾT THÚC THAY ĐỔI ===
                             const displayValue = (text === null || text === undefined) ? 'N/A' : String(text);
-                            cell.title = displayValue; // Tooltip vẫn dùng giá trị gốc
+                            cell.title = displayValue;
                             cell.textContent = displayValue;
                             if (allowWrap) {
                                 cell.classList.add('whitespace-normal');
@@ -210,25 +262,22 @@
                         };
                         const createSeverityCell = (text) => {
                             const cell = createCell(text); const upperText = text ? text.toUpperCase() : '';
-                            if (upperText === 'ERROR' || upperText === 'CRITICAL') { cell.classList.add('font-semibold', 'text-red-600'); }
-                            else if (upperText === 'WARNING') { cell.classList.add('font-semibold', 'text-yellow-600'); }
-                            else { cell.classList.add('text-gray-500'); } return cell;
+                            // === THAY ĐỔI: Thêm class dark mode cho text severity ===
+                            if (upperText === 'ERROR' || upperText === 'CRITICAL') { cell.classList.add('font-semibold', 'text-red-600', 'dark:text-red-400'); }
+                            else if (upperText === 'WARNING') { cell.classList.add('font-semibold', 'text-yellow-600', 'dark:text-yellow-400'); }
+                            else { cell.classList.add('text-gray-500', 'dark:text-gray-400'); } return cell;
+                            // === KẾT THÚC THAY ĐỔI ===
                         };
 
                         // Thêm các cell vào row (Bỏ cột Thời gian)
-                        // row.appendChild(createCell(formatVietnameseDateTime(incident.timestamp))); // Bỏ cột này
-                        row.appendChild(createCell(incident.pod_key)); // Không wrap
-                        row.appendChild(createSeverityCell(incident.severity)); // Không wrap
-                        row.appendChild(createCell(incident.summary, true)); // Cho phép wrap
-                        row.appendChild(createCell(incident.initial_reasons, true)); // Cho phép wrap
+                        row.appendChild(createCell(incident.pod_key));
+                        row.appendChild(createSeverityCell(incident.severity));
+                        row.appendChild(createCell(incident.summary, true));
+                        row.appendChild(createCell(incident.initial_reasons, true));
                         incidentsTableBody.appendChild(row);
                     });
 
                     // Bỏ phần vẽ Pie Charts
-                    // const finalSeverityCounts = ...
-                    // const finalSourceCounts = ...
-                    // severityPieInstance = ...
-                    // sourcePieInstance = ...
                 }
 
             } catch (error) {
@@ -239,13 +288,77 @@
                  hideLoading();
             }
         }
-         // === KẾT THÚC SỬA LỖI ===
+
+        // === BẮT ĐẦU THAY ĐỔI: Logic Theme Toggle ===
+        function updateThemeIcon(theme) {
+            themeToggleDarkIcon.classList.add('hidden');
+            themeToggleLightIcon.classList.add('hidden');
+            themeToggleSystemIcon.classList.add('hidden');
+
+            if (theme === 'dark') {
+                themeToggleLightIcon.classList.remove('hidden'); // Hiện icon mặt trời khi đang dark
+            } else if (theme === 'light') {
+                themeToggleDarkIcon.classList.remove('hidden'); // Hiện icon mặt trăng khi đang light
+            } else { // system
+                themeToggleSystemIcon.classList.remove('hidden'); // Hiện icon system
+            }
+        }
+
+        function applyTheme(theme) {
+             if (theme === 'dark') {
+                 document.documentElement.classList.add('dark');
+             } else if (theme === 'light') {
+                 document.documentElement.classList.remove('dark');
+             } else { // system
+                 localStorage.removeItem('theme'); // Xóa lựa chọn cũ
+                 if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                     document.documentElement.classList.add('dark');
+                 } else {
+                     document.documentElement.classList.remove('dark');
+                 }
+                 theme = 'system'; // Đặt lại theme thành system để hiển thị icon đúng
+             }
+             updateThemeIcon(theme);
+             // Vẽ lại biểu đồ với màu mới
+             fetchStats(); // Gọi lại fetchStats để vẽ lại line chart
+        }
+
+        // Sự kiện click nút theme
+        themeToggleButton.addEventListener('click', () => {
+            const currentTheme = localStorage.getItem('theme') || 'system';
+            let nextTheme;
+
+            if (currentTheme === 'light') {
+                nextTheme = 'dark';
+            } else if (currentTheme === 'dark') {
+                nextTheme = 'system';
+            } else { // current is system
+                nextTheme = 'light';
+            }
+
+            localStorage.setItem('theme', nextTheme); // Lưu lựa chọn mới (hoặc xóa nếu là system)
+            applyTheme(nextTheme);
+        });
+
+         // Lắng nghe thay đổi theme hệ thống
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
+            // Chỉ cập nhật nếu người dùng đang chọn chế độ system
+            if (!localStorage.getItem('theme') || localStorage.getItem('theme') === 'system') {
+                applyTheme('system');
+            }
+        });
+
+        // === KẾT THÚC THAY ĐỔI ===
 
 
         // Load dữ liệu lần đầu
         document.addEventListener('DOMContentLoaded', () => {
             setTodayDate();
-            fetchStats();
+            // === BẮT ĐẦU THAY ĐỔI: Áp dụng theme ban đầu ===
+            const initialTheme = localStorage.getItem('theme') || 'system';
+            applyTheme(initialTheme); // Áp dụng theme khi tải trang
+            // === KẾT THÚC THAY ĐỔI ===
+            // fetchStats(); // fetchStats đã được gọi trong applyTheme
             fetchIncidents();
         });
 
