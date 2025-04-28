@@ -19,7 +19,7 @@ spec:
       containers:
       - name: portal
         # !!! THAY THẾ BẰNG TÊN IMAGE PORTAL CỦA BẠN !!!
-        image: lechaukha12/ai-agent1-portal:v1.0.4
+        image: codebuild.alfinac.com:4444/library/ai-agent1-portal:v1.0.5
         imagePullPolicy: Always
         ports:
         - containerPort: 5000 # Port Flask chạy

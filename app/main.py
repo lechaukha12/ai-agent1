@@ -23,29 +23,46 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # --- Cấu hình ---
 LOKI_URL = os.environ.get("LOKI_URL", "http://loki-read.monitoring.svc.cluster.local:3100")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") # Cần key này để chạy Gemini thật
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 SCAN_INTERVAL_SECONDS = int(os.environ.get("SCAN_INTERVAL_SECONDS", 30))
 LOKI_SCAN_RANGE_MINUTES = int(os.environ.get("LOKI_SCAN_RANGE_MINUTES", 1))
 LOKI_DETAIL_LOG_RANGE_MINUTES = int(os.environ.get("LOKI_DETAIL_LOG_RANGE_MINUTES", 30))
 LOKI_QUERY_LIMIT = int(os.environ.get("LOKI_QUERY_LIMIT", 500))
-# Bỏ K8S_NAMESPACES và EXCLUDED_NAMESPACES khỏi env agent, sẽ đọc từ DB
-LOKI_SCAN_MIN_LEVEL = os.environ.get("LOKI_SCAN_MIN_LEVEL", "WARNING")
+K8S_NAMESPACES_STR = os.environ.get("K8S_NAMESPACES", "kube-system")
+K8S_NAMESPACES = [ns.strip() for ns in K8S_NAMESPACES_STR.split(',') if ns.strip()]
+LOKI_SCAN_MIN_LEVEL = os.environ.get("LOKI_SCAN_MIN_LEVEL", "INFO") # Đặt INFO để lấy nhiều dữ liệu hơn
 GEMINI_MODEL_NAME = os.environ.get("GEMINI_MODEL_NAME", "gemini-1.5-flash")
 ALERT_SEVERITY_LEVELS_STR = os.environ.get("ALERT_SEVERITY_LEVELS", "WARNING,ERROR,CRITICAL")
 ALERT_SEVERITY_LEVELS = [level.strip().upper() for level in ALERT_SEVERITY_LEVELS_STR.split(',') if level.strip()]
 RESTART_COUNT_THRESHOLD = int(os.environ.get("RESTART_COUNT_THRESHOLD", 5))
 DB_PATH = os.environ.get("DB_PATH", "/data/agent_stats.db")
 STATS_UPDATE_INTERVAL_SECONDS = int(os.environ.get("STATS_UPDATE_INTERVAL_SECONDS", 300))
-LOCAL_GEMINI_ENDPOINT_URL = os.environ.get("LOCAL_GEMINI_ENDPOINT")
-USE_LOCAL_MODEL_STR = os.environ.get("USE_LOCAL_MODEL", "false").lower()
-USE_LOCAL_MODEL = USE_LOCAL_MODEL_STR == "true"
-PROMPT_TEMPLATE = os.environ.get("PROMPT_TEMPLATE", """...""") # Giữ template
-# --- THÊM CẤU HÌNH MỚI ---
-NAMESPACE_REFRESH_INTERVAL_SECONDS = int(os.environ.get("NAMESPACE_REFRESH_INTERVAL_SECONDS", 3600)) # Quét lại NS mỗi giờ
-DEFAULT_MONITORED_NAMESPACES = os.environ.get("DEFAULT_MONITORED_NAMESPACES", "kube-system,default") # NS mặc định nếu DB trống
-# --- KẾT THÚC THAY ĐỔI ---
+# Không cần endpoint local và công tắc nữa vì chỉ dùng Gemini thật
+# LOCAL_GEMINI_ENDPOINT_URL = os.environ.get("LOCAL_GEMINI_ENDPOINT")
+# USE_LOCAL_MODEL_STR = os.environ.get("USE_LOCAL_MODEL", "false").lower()
+# USE_LOCAL_MODEL = USE_LOCAL_MODEL_STR == "true"
+PROMPT_TEMPLATE = os.environ.get("PROMPT_TEMPLATE", """
+Phân tích tình huống của pod Kubernetes '{namespace}/{pod_name}'.
+**Ưu tiên xem xét ngữ cảnh Kubernetes** được cung cấp dưới đây vì nó có thể là lý do chính bạn được gọi.
+Kết hợp với các dòng log sau đây (nếu có) để đưa ra phân tích đầy đủ.
+Xác định mức độ nghiêm trọng tổng thể (chọn một: INFO, WARNING, ERROR, CRITICAL).
+Nếu mức độ nghiêm trọng là WARNING, ERROR hoặc CRITICAL, hãy cung cấp một bản tóm tắt ngắn gọn (1-2 câu) bằng **tiếng Việt** giải thích vấn đề cốt lõi, kết hợp thông tin từ ngữ cảnh và log.
+Tập trung vào các tác động tiềm ẩn.
+
+Ngữ cảnh Kubernetes:
+--- START CONTEXT ---
+{k8s_context}
+--- END CONTEXT ---
+
+Các dòng log (có thể không có):
+--- START LOGS ---
+{log_text}
+--- END LOGS ---
+
+Chỉ trả lời bằng định dạng JSON với các khóa "severity" và "summary". Ví dụ: {{"severity": "CRITICAL", "summary": "Pod 'kube-system/oomkill-test-pod' bị Terminated với lý do OOMKilled và có Event OOMKilled gần đây. Cần kiểm tra giới hạn bộ nhớ và code ứng dụng."}}
+""")
 
 
 try: HCM_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -58,18 +75,20 @@ except config.ConfigException:
     except config.ConfigException: logging.error("Could not configure Kubernetes client. Exiting."); exit(1)
 k8s_core_v1 = client.CoreV1Api(); k8s_apps_v1 = client.AppsV1Api()
 
-# --- Cấu hình Gemini Client (Giữ nguyên) ---
+# --- Cấu hình Gemini Client (Bắt buộc phải có key) ---
 gemini_model = None
-if not USE_LOCAL_MODEL:
-    if GEMINI_API_KEY:
-        try:
-            genai.configure(api_key=GEMINI_API_KEY)
-            gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
-            logging.info(f"Using Google Gemini model: {GEMINI_MODEL_NAME}")
-        except Exception as e: logging.error(f"Failed to configure Gemini client: {e}", exc_info=True)
-    else: logging.error("USE_LOCAL_MODEL is false, but GEMINI_API_KEY is not set. Analysis will be skipped.")
-elif not LOCAL_GEMINI_ENDPOINT_URL:
-        logging.error("USE_LOCAL_MODEL is true, but LOCAL_GEMINI_ENDPOINT is not set. Analysis will be skipped.")
+if GEMINI_API_KEY:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+        logging.info(f"Using Google Gemini model: {GEMINI_MODEL_NAME}")
+    except Exception as e:
+        logging.error(f"Failed to configure Gemini client: {e}", exc_info=True)
+        # Dừng agent nếu không config được Gemini
+        exit(1)
+else:
+    logging.error("GEMINI_API_KEY is not set. Agent cannot run without an analysis model. Exiting.")
+    exit(1)
 
 
 # --- Logic Database ---
@@ -79,66 +98,78 @@ def init_db():
     if not os.path.exists(db_dir):
         try: os.makedirs(db_dir); logging.info(f"Created directory for database: {db_dir}")
         except OSError as e: logging.error(f"Could not create directory {db_dir}: {e}"); return False
-    conn = None
     try:
-        with sqlite3.connect(DB_PATH, timeout=10) as conn:
-            cursor = conn.cursor()
-            logging.info("Ensuring database tables exist...")
-            cursor.execute(''' CREATE TABLE IF NOT EXISTS incidents (...) ''') # Giữ nguyên
-            cursor.execute(''' CREATE TABLE IF NOT EXISTS daily_stats (...) ''') # Giữ nguyên
-            cursor.execute(''' CREATE TABLE IF NOT EXISTS users (...) ''') # Giữ nguyên
-            # === THAY ĐỔI: Thêm bảng available_namespaces và agent_config ===
+        with db_lock:
+            conn = sqlite3.connect(DB_PATH, timeout=10); cursor = conn.cursor()
+            # --- BẮT ĐẦU THAY ĐỔI: Thêm cột vào bảng incidents ---
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS available_namespaces (
-                    name TEXT PRIMARY KEY,
-                    last_seen TEXT NOT NULL
+                CREATE TABLE IF NOT EXISTS incidents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    pod_key TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    summary TEXT,
+                    initial_reasons TEXT,
+                    k8s_context TEXT,
+                    sample_logs TEXT,
+                    input_prompt TEXT,       -- Lưu prompt đã gửi cho AI
+                    raw_ai_response TEXT   -- Lưu câu trả lời thô từ AI
                 )
             ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS agent_config (
-                    key TEXT PRIMARY KEY,
-                    value TEXT
-                )
-            ''')
-            # === KẾT THÚC THAY ĐỔI ===
-            # Logic kiểm tra/thêm cột cũ giữ nguyên
+            # Kiểm tra và thêm cột mới nếu chưa có (để tương thích ngược)
             cursor.execute("PRAGMA table_info(incidents)")
-            columns_inc = [column[1] for column in cursor.fetchall()]
-            if 'input_prompt' not in columns_inc: cursor.execute("ALTER TABLE incidents ADD COLUMN input_prompt TEXT")
-            if 'raw_ai_response' not in columns_inc: cursor.execute("ALTER TABLE incidents ADD COLUMN raw_ai_response TEXT")
+            columns = [column[1] for column in cursor.fetchall()]
+            if 'input_prompt' not in columns:
+                logging.warning("Adding column 'input_prompt' to incidents table.")
+                cursor.execute("ALTER TABLE incidents ADD COLUMN input_prompt TEXT")
+            if 'raw_ai_response' not in columns:
+                logging.warning("Adding column 'raw_ai_response' to incidents table.")
+                cursor.execute("ALTER TABLE incidents ADD COLUMN raw_ai_response TEXT")
+            # --- KẾT THÚC THAY ĐỔI ---
+
+            cursor.execute(''' CREATE TABLE IF NOT EXISTS daily_stats ( date TEXT PRIMARY KEY, model_calls INTEGER DEFAULT 0, telegram_alerts INTEGER DEFAULT 0, incident_count INTEGER DEFAULT 0 ) ''')
             cursor.execute("PRAGMA table_info(daily_stats)")
             columns_stats = [column[1] for column in cursor.fetchall()]
             if 'model_calls' not in columns_stats and 'gemini_calls' in columns_stats: cursor.execute("ALTER TABLE daily_stats RENAME COLUMN gemini_calls TO model_calls")
             elif 'model_calls' not in columns_stats: cursor.execute("ALTER TABLE daily_stats ADD COLUMN model_calls INTEGER DEFAULT 0")
-
-            logging.info("Tables ensured.")
-            # Không tạo user ở đây nữa, để portal quản lý hoặc tạo thủ công
-        logging.info(f"Database initialization/check complete at {DB_PATH}")
-        return True
+            conn.commit(); conn.close(); logging.info(f"Database initialized successfully at {DB_PATH}"); return True
     except sqlite3.Error as e: logging.error(f"Database error during initialization: {e}"); return False
     except Exception as e: logging.error(f"Unexpected error during DB initialization: {e}", exc_info=True); return False
 
-def record_incident(pod_key, severity, summary, initial_reasons, k8s_context, sample_logs, input_prompt=None, raw_ai_response=None): # ... (Giữ nguyên) ...
+# --- BẮT ĐẦU THAY ĐỔI: Cập nhật hàm record_incident ---
+def record_incident(pod_key, severity, summary, initial_reasons, k8s_context, sample_logs, input_prompt=None, raw_ai_response=None):
+    """Ghi lại một sự cố vào database, bao gồm cả input và output của AI."""
     timestamp_str = datetime.now(timezone.utc).isoformat()
     try:
-        with sqlite3.connect(DB_PATH, timeout=10) as conn:
-            cursor = conn.cursor()
-            cursor.execute(''' INSERT INTO incidents (timestamp, pod_key, severity, summary, initial_reasons, k8s_context, sample_logs, input_prompt, raw_ai_response) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ''', (timestamp_str, pod_key, severity, summary, initial_reasons, k8s_context, sample_logs, input_prompt, raw_ai_response))
+        with db_lock:
+            conn = sqlite3.connect(DB_PATH, timeout=10); cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO incidents (timestamp, pod_key, severity, summary, initial_reasons, k8s_context, sample_logs, input_prompt, raw_ai_response)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (timestamp_str, pod_key, severity, summary, initial_reasons, k8s_context, sample_logs, input_prompt, raw_ai_response))
+
+            # Cập nhật số lượng incident trong ngày (chỉ khi severity đáng cảnh báo?)
+            # Hoặc cứ ghi nhận mọi severity để có dữ liệu đa dạng? -> Quyết định: Ghi nhận mọi severity vào incidents, chỉ tăng count nếu đáng báo động
             if severity in ALERT_SEVERITY_LEVELS:
                 today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-                cursor.execute(''' INSERT INTO daily_stats (date, incident_count) VALUES (?, 1) ON CONFLICT(date) DO UPDATE SET incident_count = incident_count + 1 ''', (today_str,))
-            logging.info(f"Recorded data for {pod_key} with severity {severity}")
+                cursor.execute(''' INSERT INTO daily_stats (date, incident_count) VALUES (?, 1)
+                                    ON CONFLICT(date) DO UPDATE SET incident_count = incident_count + 1 ''', (today_str,))
+
+            conn.commit(); conn.close(); logging.info(f"Recorded data for {pod_key} with severity {severity}")
     except sqlite3.Error as e: logging.error(f"Database error recording incident for {pod_key}: {e}")
     except Exception as e: logging.error(f"Unexpected error recording incident for {pod_key}: {e}", exc_info=True)
+# --- KẾT THÚC THAY ĐỔI ---
+
 def update_daily_stats(): # ... (Giữ nguyên) ...
     global model_calls_counter, telegram_alerts_counter
     if model_calls_counter == 0 and telegram_alerts_counter == 0: return
     today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d'); calls_to_add = model_calls_counter; alerts_to_add = telegram_alerts_counter
     try:
-        with sqlite3.connect(DB_PATH, timeout=10) as conn:
-            cursor = conn.cursor()
+        with db_lock:
+            conn = sqlite3.connect(DB_PATH, timeout=10); cursor = conn.cursor()
             cursor.execute('INSERT OR IGNORE INTO daily_stats (date) VALUES (?)', (today_str,))
             cursor.execute(''' UPDATE daily_stats SET model_calls = model_calls + ?, telegram_alerts = telegram_alerts + ? WHERE date = ? ''', (calls_to_add, alerts_to_add, today_str))
+            conn.commit(); conn.close()
             logging.info(f"Updated daily stats for {today_str}: +{calls_to_add} Model calls, +{alerts_to_add} Telegram alerts.")
             model_calls_counter = 0; telegram_alerts_counter = 0
     except sqlite3.Error as e: logging.error(f"Database error updating daily stats: {e}")
@@ -211,91 +242,20 @@ def format_k8s_context(pod_info, node_info, pod_events): # ... (Giữ nguyên) .
         for event in pod_events: context_str += f"  - [{event['time']}] {event['type']} {event['reason']} (x{event.get('count',1)}): {event['message'][:150]}\n"
     context_str += "--- Kết thúc ngữ cảnh ---\n"; return context_str
 
-# --- Hàm Lấy danh sách namespace động từ K8s ---
-def get_active_namespaces():
-    active_namespaces = []
-    try:
-        all_namespaces = k8s_core_v1.list_namespace(watch=False, timeout_seconds=60)
-        for ns in all_namespaces.items:
-            if ns.status.phase == "Active":
-                active_namespaces.append(ns.metadata.name)
-        logging.info(f"Found {len(active_namespaces)} active namespaces in cluster.")
-    except ApiException as e: logging.error(f"API Error listing namespaces: {e.status} {e.reason}.")
-    except Exception as e: logging.error(f"Unexpected error listing namespaces: {e}", exc_info=True)
-    return active_namespaces
-
-# --- HÀM MỚI: Cập nhật danh sách namespace trong DB ---
-def update_available_namespaces_in_db(namespaces):
-    """Cập nhật bảng available_namespaces với danh sách mới."""
-    if not namespaces: return
-    timestamp = datetime.now(timezone.utc).isoformat()
-    try:
-        with sqlite3.connect(DB_PATH, timeout=10) as conn:
-            cursor = conn.cursor()
-            # Xóa các namespace cũ không còn active (có thể không cần thiết)
-            # cursor.execute("DELETE FROM available_namespaces WHERE name NOT IN ({})".format(','.join('?'*len(namespaces))), tuple(namespaces))
-            # Thêm hoặc cập nhật namespace mới
-            for ns in namespaces:
-                cursor.execute("INSERT OR REPLACE INTO available_namespaces (name, last_seen) VALUES (?, ?)", (ns, timestamp))
-            logging.info(f"Updated available_namespaces table in DB with {len(namespaces)} namespaces.")
-    except sqlite3.Error as e:
-        logging.error(f"Database error updating available namespaces: {e}")
-    except Exception as e:
-        logging.error(f"Unexpected error updating available namespaces: {e}", exc_info=True)
-
-# --- HÀM MỚI: Đọc danh sách namespace cần giám sát từ DB ---
-def get_monitored_namespaces_from_db():
-    """Đọc cấu hình monitored_namespaces từ bảng agent_config."""
-    default_namespaces = [ns.strip() for ns in DEFAULT_MONITORED_NAMESPACES.split(',') if ns.strip()]
-    conn = get_db_connection()
-    if conn is None:
-        logging.warning("DB connection failed, using default monitored namespaces.")
-        return default_namespaces
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT value FROM agent_config WHERE key = 'monitored_namespaces'")
-        result = cursor.fetchone()
-        conn.close()
-        if result and result['value']:
-            # Parse chuỗi JSON hoặc chuỗi phẩy cách
-            try:
-                # Ưu tiên parse JSON nếu portal lưu dạng JSON array
-                monitored = json.loads(result['value'])
-                if isinstance(monitored, list):
-                        logging.info(f"Read monitored namespaces from DB (JSON): {monitored}")
-                        return monitored
-            except json.JSONDecodeError:
-                # Nếu không phải JSON, thử parse dạng phẩy cách
-                monitored = [ns.strip() for ns in result['value'].split(',') if ns.strip()]
-                logging.info(f"Read monitored namespaces from DB (CSV): {monitored}")
-                return monitored
-        else:
-            logging.warning("No monitored_namespaces config found in DB. Using default.")
-            return default_namespaces
-    except sqlite3.Error as e:
-        logging.error(f"Database error reading monitored_namespaces: {e}")
-        if conn: conn.close()
-        return default_namespaces # Trả về default nếu lỗi DB
-    except Exception as e:
-            logging.error(f"Unexpected error reading monitored_namespaces: {e}", exc_info=True)
-            if conn: conn.close()
-            return default_namespaces
-
-
 # --- Hàm Quét Loki (Giữ nguyên) ---
-def scan_loki_for_suspicious_logs(start_time, end_time, namespaces_to_scan): # ... (Giữ nguyên) ...
+def scan_loki_for_suspicious_logs(start_time, end_time): # ... (Giữ nguyên) ...
     loki_api_endpoint = f"{LOKI_URL}/loki/api/v1/query_range";
-    if not namespaces_to_scan: logging.info("No namespaces to scan in Loki."); return {}
+    if not K8S_NAMESPACES: logging.error("No namespaces configured."); return {}
     log_levels_all = ["DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"]; scan_level_index = -1
     try: scan_level_index = log_levels_all.index(LOKI_SCAN_MIN_LEVEL.upper())
     except ValueError: logging.warning(f"Invalid LOKI_SCAN_MIN_LEVEL: {LOKI_SCAN_MIN_LEVEL}. Defaulting to WARNING."); scan_level_index = log_levels_all.index("WARNING")
     levels_to_scan = log_levels_all[scan_level_index:]
-    namespace_regex = "|".join(namespaces_to_scan)
+    namespace_regex = "|".join(K8S_NAMESPACES)
     keywords_to_find = levels_to_scan + ["fail", "crash", "exception", "panic", "fatal"]
     escaped_keywords = [re.escape(k) for k in keywords_to_find]; regex_pattern = "(?i)(" + "|".join(escaped_keywords) + ")"
     logql_query = f'{{namespace=~"{namespace_regex}"}} |~ `{regex_pattern}`'; query_limit_scan = 2000
     params = {'query': logql_query,'start': int(start_time.timestamp() * 1e9),'end': int(end_time.timestamp() * 1e9),'limit': query_limit_scan,'direction': 'forward'}
-    logging.info(f"Scanning Loki for suspicious logs (Level >= {LOKI_SCAN_MIN_LEVEL} or keywords) in {len(namespaces_to_scan)} namespaces: {logql_query[:200]}..."); suspicious_logs_by_pod = {}
+    logging.info(f"Scanning Loki for suspicious logs (Level >= {LOKI_SCAN_MIN_LEVEL} or keywords): {logql_query[:200]}..."); suspicious_logs_by_pod = {}
     try:
         headers = {'Accept': 'application/json'}; response = requests.get(loki_api_endpoint, params=params, headers=headers, timeout=60); response.raise_for_status(); data = response.json()
         if 'data' in data and 'result' in data['data']:
@@ -320,10 +280,10 @@ def scan_loki_for_suspicious_logs(start_time, end_time, namespaces_to_scan): # .
     except Exception as e: logging.error(f"Unexpected error during Loki scan: {e}", exc_info=True); return {}
 
 # --- Hàm Quét K8s (Giữ nguyên) ---
-def scan_kubernetes_for_issues(namespaces_to_scan): # ... (Giữ nguyên) ...
+def scan_kubernetes_for_issues(): # ... (Giữ nguyên) ...
     problematic_pods = {}
-    logging.info(f"Scanning {len(namespaces_to_scan)} Kubernetes namespaces for problematic pods...")
-    for ns in namespaces_to_scan:
+    logging.info(f"Scanning Kubernetes namespaces {K8S_NAMESPACES_STR} for problematic pods...")
+    for ns in K8S_NAMESPACES:
         try:
             pods = k8s_core_v1.list_namespaced_pod(namespace=ns, watch=False, timeout_seconds=60)
             for pod in pods.items:
@@ -383,55 +343,75 @@ def preprocess_and_filter(log_entries): # ... (Giữ nguyên) ...
     return filtered_logs
 
 
-# --- Hàm phân tích (Giữ nguyên) ---
-def analyze_incident(log_batch, k8s_context=""): # ... (Giữ nguyên) ...
-    global model_calls_counter; model_calls_counter += 1
-    if not log_batch and not k8s_context: logging.warning("analyze_incident called with no logs and no context. Skipping."); return None
+# --- Hàm phân tích (Chỉ còn gọi Gemini thật) ---
+def analyze_incident(log_batch, k8s_context=""):
+    """Phân tích log và context K8s bằng Google Gemini API."""
+    global model_calls_counter
+    model_calls_counter += 1
+
+    if not gemini_model: # Kiểm tra xem Gemini client đã được cấu hình chưa
+            logging.warning("Gemini model not configured. Skipping analysis.")
+            return {"severity": "INFO", "summary": "Phân tích bị bỏ qua do thiếu cấu hình Gemini."}
+
+    if not log_batch and not k8s_context:
+        logging.warning("analyze_incident called with no logs and no context. Skipping.")
+        return None
+
+    # Xác định thông tin pod
     namespace = "unknown"; pod_name = "unknown"
-    if log_batch: labels = log_batch[0].get('labels', {}); namespace = labels.get('namespace', 'unknown'); pod_name = labels.get('pod', 'unknown_pod')
-    elif k8s_context: match_ns = re.search(r"Pod: (.*?)/", k8s_context); match_pod = re.search(r"Pod: .*?/(.*?)\n", k8s_context);
-    if match_ns: namespace = match_ns.group(1);
-    if match_pod: pod_name = match_pod.group(1)
+    if log_batch:
+            labels = log_batch[0].get('labels', {})
+            namespace = labels.get('namespace', 'unknown')
+            pod_name = labels.get('pod', 'unknown_pod')
+    elif k8s_context:
+            match_ns = re.search(r"Pod: (.*?)/", k8s_context); match_pod = re.search(r"Pod: .*?/(.*?)\n", k8s_context)
+            if match_ns: namespace = match_ns.group(1)
+            if match_pod: pod_name = match_pod.group(1)
+
     log_text = "N/A"
-    if log_batch: limited_logs = [f"[{entry['timestamp'].isoformat()}] {entry['message'][:500]}" for entry in log_batch[:15]]; log_text = "\n".join(limited_logs)
-    try: final_prompt = PROMPT_TEMPLATE.format(namespace=namespace, pod_name=pod_name, k8s_context=k8s_context[:10000], log_text=log_text[:20000])
-    except KeyError as e: logging.error(f"Missing placeholder in PROMPT_TEMPLATE: {e}. Using default."); final_prompt = f"Phân tích pod {namespace}/{pod_name}. Context: {k8s_context[:10000]}. Logs: {log_text[:20000]}. Trả lời JSON."
-    analysis_result = None; logging.info(f"[DEBUG] Checking analysis endpoint. USE_LOCAL_MODEL = {USE_LOCAL_MODEL} (Type: {type(USE_LOCAL_MODEL)})")
-    if USE_LOCAL_MODEL:
-        if LOCAL_GEMINI_ENDPOINT_URL:
-            logging.info(f"Attempting to call local endpoint: {LOCAL_GEMINI_ENDPOINT_URL} for pod {namespace}/{pod_name}")
-            try:
-                response = requests.post( LOCAL_GEMINI_ENDPOINT_URL, json={"prompt": final_prompt}, timeout=120); response.raise_for_status(); analysis_result = response.json(); logging.info(f"Received response from local endpoint: {analysis_result}")
-                if "severity" not in analysis_result: analysis_result["severity"] = "WARNING"
-                if "summary" not in analysis_result: analysis_result["summary"] = "Local model không cung cấp tóm tắt."
-            except requests.exceptions.RequestException as e: logging.error(f"Error calling local AI endpoint: {e}"); analysis_result = {"severity": "ERROR", "summary": f"Lỗi kết nối đến local AI service: {e}"}
-            except json.JSONDecodeError as e: logging.error(f"Error decoding JSON response from local endpoint: {e}. Response: {response.text[:500]}"); analysis_result = {"severity": "ERROR", "summary": f"Local AI service trả về không phải JSON: {response.text[:200]}"}
-            except Exception as e: logging.error(f"Unexpected error with local AI endpoint: {e}", exc_info=True); analysis_result = {"severity": "ERROR", "summary": f"Lỗi không xác định với local AI service: {e}"}
-        else: logging.error("USE_LOCAL_MODEL is true, but LOCAL_GEMINI_ENDPOINT is not configured."); analysis_result = {"severity": "ERROR", "summary": "Lỗi cấu hình: Đã bật dùng model local nhưng thiếu URL endpoint."}
-    elif gemini_model:
-        logging.info(f"Attempting to call Google Gemini API for pod {namespace}/{pod_name}")
+    if log_batch:
+            limited_logs = [f"[{entry['timestamp'].isoformat()}] {entry['message'][:500]}" for entry in log_batch[:15]]
+            log_text = "\n".join(limited_logs)
+
+    # Tạo prompt cuối cùng bằng cách format template
+    try:
+        final_prompt = PROMPT_TEMPLATE.format(
+            namespace=namespace,
+            pod_name=pod_name,
+            k8s_context=k8s_context[:10000],
+            log_text=log_text[:20000]
+        )
+    except KeyError as e:
+            logging.error(f"Missing placeholder in PROMPT_TEMPLATE: {e}. Using default prompt structure.")
+            final_prompt = f"Phân tích pod {namespace}/{pod_name}. Context: {k8s_context[:10000]}. Logs: {log_text[:20000]}. Trả lời JSON."
+
+    analysis_result = None
+    logging.info(f"Sending analysis request to Google Gemini API for pod {namespace}/{pod_name}")
+    try:
+        response = gemini_model.generate_content(final_prompt, generation_config=genai.types.GenerationConfig(temperature=0.2, max_output_tokens=300), request_options={'timeout': 90})
+        if not response.parts: logging.warning("Gemini response has no parts."); return None
+        response_text = response.text.strip(); logging.info(f"Received response from Gemini (raw): {response_text}")
+        cleaned_response_text = response_text
+        if cleaned_response_text.startswith("```json"): cleaned_response_text = cleaned_response_text.strip("```json").strip("`").strip()
+        elif cleaned_response_text.startswith("```"): cleaned_response_text = cleaned_response_text.strip("```").strip()
+        match = re.search(r'\{.*\}', cleaned_response_text, re.DOTALL); json_string_to_parse = match.group(0) if match else cleaned_response_text
         try:
-            response = gemini_model.generate_content(final_prompt, generation_config=genai.types.GenerationConfig(temperature=0.2, max_output_tokens=300), request_options={'timeout': 90})
-            if not response.parts: logging.warning("Gemini response has no parts."); return None
-            response_text = response.text.strip(); logging.info(f"Received response from Gemini (raw): {response_text}")
-            cleaned_response_text = response_text
-            if cleaned_response_text.startswith("```json"): cleaned_response_text = cleaned_response_text.strip("```json").strip("`").strip()
-            elif cleaned_response_text.startswith("```"): cleaned_response_text = cleaned_response_text.strip("```").strip()
-            match = re.search(r'\{.*\}', cleaned_response_text, re.DOTALL); json_string_to_parse = match.group(0) if match else cleaned_response_text
-            try:
-                analysis_result = json.loads(json_string_to_parse)
-                if "severity" not in analysis_result: analysis_result["severity"] = "WARNING"
-                if "summary" not in analysis_result: analysis_result["summary"] = "Không có tóm tắt."
-                logging.info(f"Successfully parsed Gemini JSON: {analysis_result}")
-            except json.JSONDecodeError as json_err:
-                logging.warning(f"Failed to decode Gemini response as JSON: {json_err}. Raw response: {response_text}")
-                severity = "WARNING"; summary_vi = f"Phản hồi Gemini không phải JSON hợp lệ ({json_err}): {response_text[:200]}"
-                if "CRITICAL" in response_text.upper(): severity = "CRITICAL"
-                elif "ERROR" in response_text.upper(): severity = "ERROR"
-                analysis_result = {"severity": severity, "summary": summary_vi}
-        except Exception as e: logging.error(f"Error calling Gemini API: {e}", exc_info=True); analysis_result = {"severity": "ERROR", "summary": f"Lỗi gọi Gemini API: {e}"}
-    else: logging.warning("No analysis endpoint available (local or remote). Skipping analysis."); analysis_result = {"severity": "INFO", "summary": "Phân tích bị bỏ qua do thiếu cấu hình endpoint."}
+            analysis_result = json.loads(json_string_to_parse)
+            if "severity" not in analysis_result: analysis_result["severity"] = "WARNING"
+            if "summary" not in analysis_result: analysis_result["summary"] = "Không có tóm tắt."
+            logging.info(f"Successfully parsed Gemini JSON: {analysis_result}")
+        except json.JSONDecodeError as json_err:
+            logging.warning(f"Failed to decode Gemini response as JSON: {json_err}. Raw response: {response_text}")
+            severity = "WARNING"; summary_vi = f"Phản hồi Gemini không phải JSON hợp lệ ({json_err}): {response_text[:200]}"
+            if "CRITICAL" in response_text.upper(): severity = "CRITICAL"
+            elif "ERROR" in response_text.upper(): severity = "ERROR"
+            analysis_result = {"severity": severity, "summary": summary_vi}
+    except Exception as e:
+        logging.error(f"Error calling Gemini API: {e}", exc_info=True)
+        analysis_result = {"severity": "ERROR", "summary": f"Lỗi gọi Gemini API: {e}"}
+
     return analysis_result
+
 
 # --- Hàm gửi cảnh báo Telegram (Giữ nguyên) ---
 def send_telegram_alert(message): # ... (Giữ nguyên) ...
@@ -444,42 +424,14 @@ def send_telegram_alert(message): # ... (Giữ nguyên) ...
     except Exception as e: logging.error(f"An unexpected error occurred during Telegram send: {e}", exc_info=True)
 
 
-# --- Vòng lặp chính (Sửa để dùng list namespace động từ DB) ---
+# --- Vòng lặp chính (Giữ nguyên logic gọi hàm analyze_incident) ---
 def main_loop():
     recently_alerted_pods = {}
-    last_namespace_refresh_time = time.time() - NAMESPACE_REFRESH_INTERVAL_SECONDS - 1 # Đảm bảo quét lần đầu
-
     while True:
-        start_cycle_time = datetime.now(timezone.utc)
-        logging.info("--- Starting new monitoring cycle (Parallel Scan - DB Configured Namespaces) ---")
-
-        # --- THAY ĐỔI: Lấy danh sách namespace cần giám sát ---
-        # Lấy danh sách namespace động từ K8s định kỳ và cập nhật DB
-        current_time = time.time()
-        if current_time - last_namespace_refresh_time >= NAMESPACE_REFRESH_INTERVAL_SECONDS:
-                logging.info("Refreshing list of active namespaces from Kubernetes API...")
-                all_active_namespaces = get_active_namespaces()
-                update_available_namespaces_in_db(all_active_namespaces)
-                last_namespace_refresh_time = current_time
-
-        # Đọc danh sách namespace cần theo dõi từ DB
-        monitored_namespaces = get_monitored_namespaces_from_db()
-        if not monitored_namespaces:
-                logging.warning("No namespaces configured for monitoring in DB. Skipping cycle.")
-                time.sleep(SCAN_INTERVAL_SECONDS)
-                continue
-        logging.info(f"Currently monitoring {len(monitored_namespaces)} namespaces based on DB config: {', '.join(monitored_namespaces)}")
-        # --- KẾT THÚC THAY ĐỔI ---
-
-        # 1. Quét K8s tìm pod có vấn đề (chỉ trong các namespace được theo dõi)
-        k8s_problem_pods = scan_kubernetes_for_issues(monitored_namespaces)
-
-        # 2. Quét Loki tìm log đáng ngờ (chỉ trong các namespace được theo dõi)
-        loki_scan_end_time = start_cycle_time
-        loki_scan_start_time = loki_scan_end_time - timedelta(minutes=LOKI_SCAN_RANGE_MINUTES)
-        loki_suspicious_logs = scan_loki_for_suspicious_logs(loki_scan_start_time, loki_scan_end_time, monitored_namespaces)
-
-        # 3. Gom danh sách pod cần điều tra (Giữ nguyên)
+        start_cycle_time = datetime.now(timezone.utc); logging.info("--- Starting new monitoring cycle (Parallel Scan - Gemini) ---") # Cập nhật log
+        k8s_problem_pods = scan_kubernetes_for_issues()
+        loki_scan_end_time = start_cycle_time; loki_scan_start_time = loki_scan_end_time - timedelta(minutes=LOKI_SCAN_RANGE_MINUTES)
+        loki_suspicious_logs = scan_loki_for_suspicious_logs(loki_scan_start_time, loki_scan_end_time)
         pods_to_investigate = {}
         for pod_key, data in k8s_problem_pods.items():
             if pod_key not in pods_to_investigate: pods_to_investigate[pod_key] = {"reason": [], "logs": []}
@@ -490,9 +442,7 @@ def main_loop():
                 pods_to_investigate[pod_key]["logs"].extend(logs)
         logging.info(f"Total pods to investigate this cycle: {len(pods_to_investigate)}")
 
-        # 4. Xử lý từng pod (Giữ nguyên logic)
         for pod_key, data in pods_to_investigate.items():
-            # ... (Giữ nguyên toàn bộ logic xử lý pod, lấy context, lấy log, phân tích, gửi cảnh báo, cooldown, record_incident) ...
             namespace, pod_name = pod_key.split('/', 1); initial_reasons = "; ".join(data["reason"]); suspicious_logs_found = data["logs"]
             now_utc = datetime.now(timezone.utc)
             if pod_key in recently_alerted_pods:
@@ -508,33 +458,39 @@ def main_loop():
                 log_end_time = datetime.now(timezone.utc); log_start_time = log_end_time - timedelta(minutes=LOKI_DETAIL_LOG_RANGE_MINUTES)
                 detailed_logs = query_loki_for_pod(namespace, pod_name, log_start_time, log_end_time)
                 logs_for_analysis = preprocess_and_filter(detailed_logs)
+
+            # Gọi hàm phân tích (chỉ gọi Gemini thật)
             analysis_start_time = time.time()
             analysis_result = analyze_incident(logs_for_analysis, k8s_context_str)
             analysis_duration = time.time() - analysis_start_time
             logging.info(f"Analysis for {pod_key} took {analysis_duration:.2f} seconds.")
+
             if analysis_result:
                 severity = analysis_result.get("severity", "UNKNOWN").upper(); summary = analysis_result.get("summary", "N/A")
-                logging.info(f"Analysis result for '{pod_key}': Severity={severity}, Summary={summary}")
-                # --- THAY ĐỔI: Truyền prompt và response vào record_incident ---
+                # --- BẮT ĐẦU THAY ĐỔI: Gọi record_incident với prompt và response ---
                 # Lấy prompt đã format (cần lưu lại từ hàm analyze_incident, hoặc tạo lại)
+                # Tạm thời tạo lại để đơn giản
                 try:
                         formatted_prompt = PROMPT_TEMPLATE.format(
                             namespace=namespace, pod_name=pod_name,
                             k8s_context=k8s_context_str[:10000],
                             log_text="\n".join([f"[{entry['timestamp'].isoformat()}] {entry['message'][:500]}" for entry in logs_for_analysis[:15]]) if logs_for_analysis else "N/A"
                         )
-                except KeyError: formatted_prompt = "Lỗi tạo prompt từ template"
-                # Lấy raw response (cần sửa hàm analyze_incident để trả về cả raw_response)
-                # Tạm thời để là kết quả JSON phân tích được
-                raw_response_text = json.dumps(analysis_result) if analysis_result else None
-                # --- KẾT THÚC THAY ĐỔI ---
+                except KeyError:
+                        formatted_prompt = "Lỗi tạo prompt từ template"
 
-                # Ghi lại tất cả kết quả phân tích vào DB
+                # Lấy raw response (cần sửa hàm analyze_incident để trả về cả raw_response)
+                # Tạm thời để là None
+                raw_response_text = None # Cần sửa analyze_incident để trả về cái này
+
+                # Chỉ ghi vào DB nếu severity đạt ngưỡng cảnh báo HOẶC ở mức INFO trở lên (để thu thập data)
+                # Quyết định: Ghi lại tất cả các kết quả phân tích để có dữ liệu huấn luyện đa dạng
                 record_incident(pod_key, severity, summary, initial_reasons, k8s_context_str,
                                 "\n".join([f"- `{log['message'][:150]}`" for log in logs_for_analysis[:5]]) if logs_for_analysis else "-",
                                 formatted_prompt, # Lưu prompt
-                                raw_response_text # Lưu kết quả JSON
+                                json.dumps(analysis_result) if analysis_result else None # Lưu kết quả JSON phân tích được
                                 )
+                # --- KẾT THÚC THAY ĐỔI ---
 
                 if severity in ALERT_SEVERITY_LEVELS:
                     sample_logs = "\n".join([f"- `{log['message'][:150]}`" for log in logs_for_analysis[:5]])
@@ -545,8 +501,6 @@ def main_loop():
             else: logging.warning(f"Analysis failed or returned no result for pod '{pod_key}'.")
             time.sleep(5)
 
-
-        # Ngủ đến hết chu kỳ
         cycle_duration = (datetime.now(timezone.utc) - start_cycle_time).total_seconds()
         sleep_time = max(0, SCAN_INTERVAL_SECONDS - cycle_duration)
         logging.info(f"--- Cycle finished in {cycle_duration:.2f}s. Sleeping for {sleep_time:.2f} seconds... ---")
@@ -555,27 +509,17 @@ def main_loop():
 if __name__ == "__main__":
     if not init_db(): logging.error("Failed to initialize database. Exiting."); exit(1)
     stats_thread = threading.Thread(target=periodic_stat_update, daemon=True); stats_thread.start(); logging.info("Started periodic stats update thread.")
-    logging.info(f"Starting Kubernetes Log Monitoring Agent (Parallel Scan - DB Configured Namespaces)") # Cập nhật log
+    logging.info(f"Starting Kubernetes Log Monitoring Agent (Parallel Scan - Data Collection Mode) for namespaces: {K8S_NAMESPACES_STR}") # Cập nhật log
     logging.info(f"Loki scan minimum level: {LOKI_SCAN_MIN_LEVEL}")
     logging.info(f"Alerting for severity levels: {ALERT_SEVERITY_LEVELS_STR}")
     logging.info(f"Restart count threshold: {RESTART_COUNT_THRESHOLD}")
-    # Cập nhật log khởi động
-    if USE_LOCAL_MODEL:
-            if LOCAL_GEMINI_ENDPOINT_URL: logging.info(f"Using local analysis endpoint: {LOCAL_GEMINI_ENDPOINT_URL}")
-            else: logging.error("USE_LOCAL_MODEL is true, but LOCAL_GEMINI_ENDPOINT is not configured!")
-    elif gemini_model: logging.info(f"Using Google Gemini model: {GEMINI_MODEL_NAME}")
-    else: logging.warning("No analysis endpoint configured (Gemini API key might be missing or invalid)!")
+    if gemini_model: logging.info(f"Using Google Gemini model: {GEMINI_MODEL_NAME}") # Chỉ log nếu dùng Gemini
+    else: logging.error("Gemini model could not be configured. Check API Key. Exiting."); exit(1)
 
-    # Bỏ kiểm tra K8S_NAMESPACES
-    if not all([LOKI_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID]):
-            logging.error("One or more required environment variables are missing (LOKI_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID). Ensure they are set. Exiting.")
+    if not K8S_NAMESPACES: logging.error("K8S_NAMESPACES environment variable is not set or is empty. Exiting."); exit(1)
+    if not all([LOKI_URL, GEMINI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID]): # Bắt buộc phải có Gemini Key
+            logging.error("One or more required environment variables are missing (LOKI_URL, GEMINI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID). Ensure they are set. Exiting.")
             exit(1)
-    # Kiểm tra điều kiện cấu hình endpoint
-    if not LOCAL_GEMINI_ENDPOINT_URL and not gemini_model:
-            logging.error("No usable analysis endpoint configured. Either set USE_LOCAL_MODEL=true and provide LOCAL_GEMINI_ENDPOINT, or set USE_LOCAL_MODEL=false and provide GEMINI_API_KEY. Exiting.")
-            exit(1)
-
     try: main_loop()
     except KeyboardInterrupt: logging.info("Agent stopped by user.")
     finally: logging.info("Performing final stats update before exiting..."); update_daily_stats(); logging.info("Agent shutdown complete.")
-
