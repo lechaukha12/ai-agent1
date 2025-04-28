@@ -1,9 +1,11 @@
 import os
 import logging
 from flask import Flask, request, jsonify
-import re # Thêm import re
+import re # Import thư viện regex
+import json # Import thư viện json
 try:
-    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+    # Thay đổi import model phù hợp
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
     import torch
 except ImportError:
     logging.error("Transformers or PyTorch not installed.")
@@ -14,36 +16,45 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 app = Flask(__name__)
 
 # --- Load Model ---
-MODEL_PATH = os.environ.get("MODEL_PATH", "/app/local_model") # Đường dẫn model trong container
-DEVICE = "cpu" # Chỉ chạy CPU
+MODEL_PATH = os.environ.get("MODEL_PATH", "/app/local_model")
+DEVICE = "cpu"
 model = None
 tokenizer = None
+# Định nghĩa các nhãn (labels)
+LABELS = ["INFO", "WARNING", "ERROR", "CRITICAL"] # Thứ tự này quan trọng
+ID2LABEL = {i: label for i, label in enumerate(LABELS)}
+LABEL2ID = {label: i for i, label in enumerate(LABELS)}
 
 try:
-    logging.info(f"Loading local model from: {MODEL_PATH}")
+    logging.info(f"Loading local classification model from: {MODEL_PATH}")
     if not os.path.isdir(MODEL_PATH):
-            raise FileNotFoundError(f"Model directory not found at {MODEL_PATH}")
+         raise FileNotFoundError(f"Model directory not found at {MODEL_PATH}")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-    model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_PATH)
+    # Thêm ignore_mismatched_sizes=True khi load model
+    model = AutoModelForSequenceClassification.from_pretrained(
+        MODEL_PATH,
+        num_labels=len(LABELS),
+        id2label=ID2LABEL,
+        label2id=LABEL2ID,
+        ignore_mismatched_sizes=True # Bỏ qua lỗi không khớp kích thước lớp cuối
+    )
     model.to(DEVICE)
-    model.eval() # Chế độ evaluation
-    logging.info(f"Local model loaded successfully onto device: {DEVICE}")
+    model.eval()
+    logging.info(f"Local classification model loaded successfully onto device: {DEVICE}")
 except Exception as e:
     logging.error(f"Failed to load model: {e}", exc_info=True)
-    # Flask vẫn chạy nhưng sẽ trả lỗi 503 ở healthz
 
 @app.route('/healthz')
 def healthz():
-    # Endpoint kiểm tra sức khỏe đơn giản
     if model and tokenizer:
         return "OK", 200
     else:
         return "Model not loaded", 503
 
-@app.route('/generate', methods=['POST'])
-def generate_text():
-    """Endpoint nhận prompt và trả về kết quả phân tích."""
-    global model, tokenizer # Sử dụng model và tokenizer đã load
+@app.route('/generate', methods=['POST']) # Giữ tên endpoint cho agent không cần đổi
+def classify_severity(): # Đổi tên hàm cho rõ nghĩa
+    """Endpoint nhận prompt (log+context) và trả về mức độ nghiêm trọng."""
+    global model, tokenizer
 
     if not model or not tokenizer:
         logging.error("Model or tokenizer not loaded.")
@@ -53,53 +64,48 @@ def generate_text():
         return jsonify({"error": "Request must be JSON"}), 400
 
     data = request.get_json()
-    prompt = data.get('prompt')
+    prompt_content = data.get('prompt') # Vẫn nhận 'prompt' từ agent
 
-    if not prompt:
+    if not prompt_content:
         return jsonify({"error": "Missing 'prompt' in JSON body"}), 400
 
-    logging.info(f"Received prompt (length: {len(prompt)}): {prompt[:200]}...")
+    logging.info(f"Received content for classification (length: {len(prompt_content)}): {prompt_content[:200]}...")
 
-    analysis_result = {"severity": "INFO", "summary": "Phân tích model local chưa hoàn chỉnh."} # Mặc định
+    # Mặc định là INFO, summary là null
+    analysis_result = {"severity": "INFO", "summary": None}
 
     try:
-        # Tokenize input
-        inputs = tokenizer(prompt, return_tensors="pt", max_length=1024, truncation=True).to(DEVICE)
+        # Tokenize input cho sequence classification
+        inputs = tokenizer(prompt_content, return_tensors="pt", max_length=512, truncation=True, padding=True).to(DEVICE)
 
-        # Generate output
+        # Chạy inference
         with torch.no_grad():
-                outputs = model.generate(**inputs, max_new_tokens=150, num_beams=2, early_stopping=True)
+            outputs = model(**inputs)
+            logits = outputs.logits
 
-        # Decode output
-        response_text = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
-        logging.info(f"Local model raw response: {response_text}")
+        # Tìm nhãn có điểm cao nhất
+        predicted_class_id = logits.argmax().item()
+        # Kiểm tra ID có hợp lệ không trước khi truy cập id2label
+        if predicted_class_id in model.config.id2label:
+             predicted_severity = model.config.id2label[predicted_class_id]
+        else:
+             logging.warning(f"Predicted class ID {predicted_class_id} not found in model config. Defaulting to WARNING.")
+             predicted_severity = "WARNING" # Fallback nếu ID không hợp lệ
 
-        # Parse JSON
-        cleaned_response_text = response_text
-        if cleaned_response_text.startswith("```json"): cleaned_response_text = cleaned_response_text.strip("```json").strip("`").strip()
-        elif cleaned_response_text.startswith("```"): cleaned_response_text = cleaned_response_text.strip("```").strip()
-        # Dùng re.search đã import
-        match = re.search(r'\{.*\}', cleaned_response_text, re.DOTALL); json_string_to_parse = match.group(0) if match else cleaned_response_text
 
-        try:
-            parsed_result = json.loads(json_string_to_parse)
-            analysis_result["severity"] = parsed_result.get("severity", "WARNING").upper()
-            analysis_result["summary"] = parsed_result.get("summary", "Không có tóm tắt từ model.")
-            logging.info(f"Parsed local model response: {analysis_result}")
+        analysis_result["severity"] = predicted_severity.upper()
+        # Giữ summary là null hoặc câu cố định
+        analysis_result["summary"] = f"Model phân loại là {predicted_severity}." # Hoặc để null
 
-        except json.JSONDecodeError as json_err:
-            logging.warning(f"Failed to decode local model response as JSON: {json_err}. Raw: {response_text}")
-            severity = "WARNING"
-            if "CRITICAL" in response_text.upper(): severity = "CRITICAL"
-            elif "ERROR" in response_text.upper(): severity = "ERROR"
-            analysis_result = {"severity": severity, "summary": f"Model trả về không phải JSON: {response_text[:200]}"}
+        logging.info(f"Classification result: {analysis_result}")
 
         return jsonify(analysis_result), 200
 
     except Exception as e:
-        logging.error(f"Error during local model inference: {e}", exc_info=True)
-        return jsonify({"error": f"Inference error: {e}"}), 500
+        logging.error(f"Error during local model classification: {e}", exc_info=True)
+        analysis_result = {"severity": "ERROR", "summary": f"Lỗi khi phân loại: {e}"}
+        return jsonify(analysis_result), 500
 
 if __name__ == '__main__':
-    # Chạy Flask dev server để test, production nên dùng Gunicorn
+    # Chạy bằng Gunicorn trong Dockerfile, đây chỉ để test local nếu cần
     app.run(host='0.0.0.0', port=5000, debug=False)

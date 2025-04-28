@@ -1,46 +1,76 @@
-# Sử dụng base image Python slim
-FROM python:3.10-slim
+# === Stage 1: Build Stage ===
+# Dùng một image Python đầy đủ hơn để cài đặt và tải model
+FROM python:3.10 as builder
 
-# Thiết lập thư mục làm việc
-WORKDIR /app
+WORKDIR /build
 
-# Cài đặt git để tải model nếu cần
+# Cài git để tải model
 RUN apt-get update && apt-get install -y --no-install-recommends git git-lfs && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Sao chép requirements trước
+# Copy requirements và cài đặt (bao gồm cả build dependencies nếu có)
 COPY gemini_local/requirements.txt .
-
-# Cài đặt thư viện
+# --- Ép cài bản PyTorch CPU ---
+# Tìm URL bản CPU phù hợp trên https://pytorch.org/get-started/locally/
+# Ví dụ cho Linux x86_64 (có thể cần thay đổi nếu kiến trúc khác)
+RUN pip install --no-cache-dir torch==2.1.0+cpu torchvision==0.16.0+cpu torchaudio==2.1.0+cpu --index-url https://download.pytorch.org/whl/cpu
+# Cài các thư viện còn lại
 RUN pip install --no-cache-dir --prefer-binary -r requirements.txt
 
-# Tải model (chạy với root)
-ARG MODEL_NAME=google/flan-t5-small
-ARG MODEL_PATH=/app/local_model
-RUN python -c "from transformers import AutoModelForSeq2SeqLM, AutoTokenizer; \
+# Tải model DistilBERT
+ARG MODEL_NAME=distilbert-base-uncased
+ARG MODEL_PATH=/build/local_model
+RUN python -c "from transformers import AutoModelForSequenceClassification, AutoTokenizer; \
     import os; \
     model_name = os.getenv('MODEL_NAME', '${MODEL_NAME}'); \
     model_path = os.getenv('MODEL_PATH', '${MODEL_PATH}'); \
     print(f'Downloading model {model_name} to {model_path}...'); \
     os.makedirs(model_path, exist_ok=True); \
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_name); \
-    tokenizer = AutoTokenizer.from_pretrained(model_name); \
-    model.save_pretrained(model_path); \
-    tokenizer.save_pretrained(model_path); \
+    model_to_save = AutoModelForSequenceClassification.from_pretrained(model_name); \
+    tokenizer_to_save = AutoTokenizer.from_pretrained(model_name); \
+    model_to_save.save_pretrained(model_path); \
+    tokenizer_to_save.save_pretrained(model_path); \
     print('Model download complete.')"
 
-# Sao chép code ứng dụng Flask
+# === Stage 2: Final Stage ===
+# Dùng image slim siêu nhẹ
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Cài đặt các gói runtime cần thiết (tzdata)
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Tạo user và group không phải root
+RUN groupadd -r appuser && useradd --no-log-init -r -g appuser appuser
+
+# Tạo các thư mục cần thiết và cấp quyền
+RUN mkdir /app/local_model /data && chown -R appuser:appuser /app /data
+
+# Copy các thư viện đã cài đặt từ build stage
+# Quan trọng: Copy đúng đường dẫn site-packages của môi trường ảo (nếu dùng) hoặc global
+# Thường là /usr/local/lib/python3.10/site-packages/ trong image Python gốc
+COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
+# Copy cả các file thực thi của thư viện (nếu cần)
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy model đã tải từ build stage
+COPY --from=builder /build/local_model /app/local_model
+
+# Copy code ứng dụng Flask
 COPY ./gemini_local /app
 
-# Cấp quyền cho user không phải root
-RUN chown -R 1001:1001 /app
-USER 1001
+# Đảm bảo quyền sở hữu đúng
+RUN chown -R appuser:appuser /app
+
+# Chuyển sang user không phải root
+USER appuser
 
 # Mở port Flask
 EXPOSE 5000
 
-# Chạy bằng Gunicorn (khuyến nghị)
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "2", "--timeout", "120", "app:app"]
-# Hoặc chạy Flask dev server (chỉ để test)
-# CMD ["python", "app.py"]
+# Chạy bằng Gunicorn
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "--timeout", "120", "app:app"]

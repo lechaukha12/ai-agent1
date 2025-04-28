@@ -6,7 +6,9 @@
     <title>K8s Log Agent Dashboard v1.0.5</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script>
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) { document.documentElement.classList.add('dark') } else { document.documentElement.classList.remove('dark') }
+    </script>
     <style>
         body { font-family: 'Inter', sans-serif; scroll-behavior: smooth; }
         .stat-card { transition: transform 0.2s ease-in-out; }
@@ -15,12 +17,10 @@
         .dark #loading-spinner { border-top-color: #60a5fa; }
         .chart-container { min-height: 300px; position: relative; }
         #incidents-table th, #incidents-table td { padding: 0.75rem 1rem; }
-        #incidents-table tbody tr { cursor: pointer; transition: background-color 0.1s ease-in-out; }
+        #incidents-table tbody tr { transition: background-color 0.1s ease-in-out; } /* Bỏ cursor */
         #incidents-table tbody tr:hover { background-color: rgba(0, 0, 0, 0.03); }
         .dark #incidents-table tbody tr:hover { background-color: rgba(255, 255, 255, 0.05); }
-        [x-cloak] { display: none !important; }
-        .modal-content { max-height: 80vh; overflow-y: auto; }
-        /* Căn chỉnh 5 cột */
+        /* Bỏ style modal */
         #incidents-table th:nth-child(1), #incidents-table td:nth-child(1) { width: 15%; } /* Thời gian */
         #incidents-table th:nth-child(2), #incidents-table td:nth-child(2) { width: 25%; } /* Pod */
         #incidents-table th:nth-child(3), #incidents-table td:nth-child(3) { width: 15%; } /* Mức độ */
@@ -33,46 +33,13 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 p-4 md:p-8 transition-colors duration-300">
-    <div x-data="{ open: false, incident: {} }" x-show="open" x-cloak
-         @open-incident-modal.window="incident = $event.detail; open = true"
-         @keydown.escape.window="open = false"
-         class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
-        <div class="flex items-end justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
-            <div x-show="open" x-transition:enter="ease-out duration-300" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="ease-in duration-200" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity dark:bg-gray-900 dark:bg-opacity-75" @click="open = false" aria-hidden="true"></div>
-            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-            <div x-show="open" x-transition:enter="ease-out duration-300" x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95" x-transition:enter-end="opacity-100 translate-y-0 sm:scale-100" x-transition:leave="ease-in duration-200" x-transition:leave-start="opacity-100 translate-y-0 sm:scale-100" x-transition:leave-end="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95" class="inline-block align-bottom bg-white dark:bg-gray-800 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-3xl sm:w-full">
-                <div class="bg-white dark:bg-gray-800 px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                    <div class="sm:flex sm:items-start">
-                        <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
-                            <h3 class="text-lg leading-6 font-medium text-gray-900 dark:text-white mb-4" id="modal-title"> Chi tiết Sự cố #<span x-text="incident?.id ?? 'N/A'"></span></h3>
-                            <div class="mt-2 text-sm text-gray-600 dark:text-gray-300 space-y-3 modal-content">
-                                <p><strong>Pod:</strong> <code class="bg-gray-200 dark:bg-gray-700 px-1 rounded" x-text="incident?.pod_key ?? 'N/A'"></code></p>
-                                <p><strong>Thời gian:</strong> <span x-text="incident?.timestamp ? formatVietnameseDateTime(incident.timestamp) : 'N/A'"></span></p>
-                                <p><strong>Mức độ:</strong> <span :class="{ 'font-semibold text-red-600 dark:text-red-400': incident?.severity === 'ERROR' || incident?.severity === 'CRITICAL', 'font-semibold text-yellow-600 dark:text-yellow-400': incident?.severity === 'WARNING', 'text-gray-500 dark:text-gray-400': incident?.severity === 'INFO' || !incident?.severity }" x-text="incident?.severity ?? 'N/A'"></span></p>
-                                <p><strong>Lý do phát hiện ban đầu:</strong></p>
-                                <pre class="bg-gray-100 dark:bg-gray-700 p-2 rounded text-xs whitespace-pre-wrap break-words" x-text="incident?.initial_reasons ?? 'N/A'"></pre>
-                                <p><strong>Tóm tắt (AI):</strong></p>
-                                <pre class="bg-gray-100 dark:bg-gray-700 p-2 rounded text-xs whitespace-pre-wrap break-words" x-text="incident?.summary ?? 'N/A'"></pre>
-                                <p><strong>Log mẫu:</strong></p>
-                                <pre class="bg-gray-100 dark:bg-gray-700 p-2 rounded text-xs whitespace-pre-wrap break-words" x-text="incident?.sample_logs ?? 'N/A'"></pre>
-                                <p><strong>Ngữ cảnh K8s:</strong></p>
-                                <pre class="bg-gray-100 dark:bg-gray-700 p-2 rounded text-xs whitespace-pre-wrap break-words" x-text="incident?.k8s_context ?? 'N/A'"></pre>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="bg-gray-50 dark:bg-gray-700 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                    <button @click="open = false" type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white dark:bg-gray-600 text-base font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"> Đóng </button>
-                </div>
-            </div>
-        </div>
-    </div>
     <div class="max-w-7xl mx-auto">
         <header class="mb-8 text-center relative">
             <h1 class="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-2">K8s Log Agent Dashboard</h1>
             <p class="text-gray-600 dark:text-gray-400">Theo dõi sự cố và hoạt động của agent.</p>
             <p class="text-xs text-gray-500 dark:text-gray-500 mt-1">Đọc dữ liệu từ: <code id="db-path" class="bg-gray-200 dark:bg-gray-700 px-1 rounded">{{ db_path }}</code></p>
-            <div class="absolute top-0 right-0 mt-2 mr-2">
+            <div class="absolute top-0 right-0 mt-2 mr-2 flex items-center space-x-2">
+                 <a href="{{ url_for('logout') }}" class="text-sm text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors duration-200">Đăng xuất</a>
                 <button id="theme-toggle-button" type="button" class="text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-4 focus:ring-gray-200 dark:focus:ring-gray-700 rounded-lg text-sm p-2.5 transition-colors duration-200">
                     <svg id="theme-toggle-dark-icon" class="hidden" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path></svg>
                     <svg id="theme-toggle-light-icon" class="hidden" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm-.707 7.072l.707-.707a1 1 0 011.414 1.414l-.707.707a1 1 0 01-1.414-1.414zM13 17a1 1 0 100-2h-1a1 1 0 100 2h1zm-9-8a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1z" fill-rule="evenodd" clip-rule="evenodd"></path></svg>
@@ -236,7 +203,11 @@
         let currentStatsDays = 1;
         let currentIncidentStartDate = null;
         let currentIncidentEndDate = null;
-        const ALERTING_SEVERITY_LEVELS = ['WARNING', 'ERROR', 'CRITICAL'];
+        // === BẮT ĐẦU SỬA LỖI: Lấy ALERTING_SEVERITY_LEVELS từ backend ===
+        // Thay vì hardcode, mình sẽ lấy từ API /stats (cần sửa backend để trả về)
+        // Tạm thời vẫn hardcode để frontend chạy được
+        let ALERTING_SEVERITY_LEVELS = ['WARNING', 'ERROR', 'CRITICAL'];
+        // === KẾT THÚC SỬA LỖI ===
 
 
         // === Hàm tiện ích ===
@@ -256,17 +227,12 @@
              const day = String(today.getDate()).padStart(2, '0');
              const month = String(today.getMonth() + 1).padStart(2, '0');
              const year = today.getFullYear();
-             // === SỬA LỖI: Kiểm tra todayDateElem trước khi gán ===
-             if (todayDateElem) {
-                todayDateElem.textContent = `${day}/${month}/${year}`;
-             } else {
-                console.error("Element with ID 'today-date' not found.");
-             }
-             // === KẾT THÚC SỬA LỖI ===
+             if (todayDateElem) { todayDateElem.textContent = `${day}/${month}/${year}`; }
+             else { console.error("Element with ID 'today-date' not found."); }
         }
 
-        // === Hàm vẽ biểu đồ ===
-        function renderLineChart(dailyStats) { /* Giữ nguyên */
+        // === Hàm vẽ biểu đồ (Giữ nguyên) ===
+        function renderLineChart(dailyStats) { /* ... */
              lineChartErrorElem.classList.add('hidden'); lineChartNoDataElem.classList.add('hidden');
              if (!dailyStats || dailyStats.length < 1) { console.warn("Không đủ dữ liệu hàng ngày để vẽ biểu đồ đường."); lineChartNoDataElem.classList.remove('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; } return; }
              dailyStats.sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -282,7 +248,7 @@
              if (lineChartInstance) { lineChartInstance.destroy(); }
              lineChartInstance = new Chart(lineChartCtx, chartConfig);
         }
-        function renderPieChart(ctx, errorElem, noDataElem, chartInstance, chartData, title) { /* Giữ nguyên */
+        function renderPieChart(ctx, errorElem, noDataElem, chartInstance, chartData, title) { /* ... */
             errorElem.classList.add('hidden'); noDataElem.classList.add('hidden');
             const labels = Object.keys(chartData); const data = Object.values(chartData);
             const total = data.reduce((sum, value) => sum + value, 0);
@@ -296,7 +262,7 @@
              if (chartInstance) { chartInstance.destroy(); }
              return new Chart(ctx, pieChartConfig);
          }
-         function renderBarChart(ctx, errorElem, noDataElem, chartInstance, chartData, title) { /* Giữ nguyên */
+         function renderBarChart(ctx, errorElem, noDataElem, chartInstance, chartData, title) { /* ... */
              errorElem.classList.add('hidden'); noDataElem.classList.add('hidden');
              const labels = Object.keys(chartData); const data = Object.values(chartData);
              if (labels.length === 0) { console.warn(`Không có dữ liệu cho biểu đồ cột: ${title}`); noDataElem.classList.remove('hidden'); if (chartInstance) { chartInstance.destroy(); chartInstance = null; } return null; }
@@ -350,7 +316,7 @@
             }
         }
 
-        // === BẮT ĐẦU SỬA LỖI: Hàm fetchIncidents ===
+        // === Hàm fetchIncidents ===
         async function fetchIncidents(page = 1, podFilter = '', severityFilter = '', startDate = null, endDate = null) {
             showLoading();
             currentIncidentPage = page; currentPodFilter = podFilter; currentSeverityFilter = severityFilter;
@@ -379,37 +345,27 @@
 
                 incidentsTableBody.innerHTML = '';
 
-                // Bỏ phần tính toán Pie Chart ra khỏi đây
-
                 if (incidents.length === 0) {
                     incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-gray-500 dark:text-gray-400">Không tìm thấy sự cố nào khớp với bộ lọc.</td></tr>`;
                 } else {
                     incidents.forEach(incident => {
-                        // Bỏ phần xử lý ngày cho Pie Chart
-
                         const row = document.createElement('tr');
-                        row.setAttribute('data-incident-id', incident.id);
-                        row.onclick = () => openModal(incident.id); // Dùng onclick chuẩn
+                        // Bỏ onclick
 
                         const severityUpper = incident.severity ? incident.severity.toUpperCase() : '';
                         if (severityUpper === 'ERROR' || severityUpper === 'CRITICAL') { row.classList.add('bg-red-50', 'dark:bg-opacity-10', 'dark:bg-red-900'); }
                         else if (severityUpper === 'WARNING') { row.classList.add('bg-yellow-50', 'dark:bg-opacity-10', 'dark:bg-yellow-900'); }
 
-                        // Hàm tạo cell (Sửa lại v8)
-                        const createCell = (text, applyLineClamp = false) => { // Đổi tên tham số
+                        // Hàm tạo cell (Bỏ line-clamp, dùng wrap)
+                        const createCell = (text, allowWrap = false) => {
                             const cell = document.createElement('td');
-                            cell.className = 'px-4 py-3 text-sm text-gray-700 dark:text-gray-300 align-top'; // Luôn align top
-
+                            cell.className = 'px-4 py-3 text-sm text-gray-700 dark:text-gray-300 align-top';
                             const displayValue = (text === null || text === undefined) ? 'N/A' : String(text);
-
-                            // Gán title là nội dung đầy đủ (cho tooltip mặc định của trình duyệt)
-                            cell.title = displayValue;
-                            // Gán textContent
+                            // === SỬA LỖI: Gán title trước textContent ===
+                            cell.title = displayValue; // Tooltip sẽ dùng cái này
                             cell.textContent = displayValue;
-
-                            // Thêm class giới hạn dòng nếu cần
-                            if (applyLineClamp) {
-                                cell.classList.add('line-clamp-2'); // Dùng lại class CSS
+                            // === KẾT THÚC SỬA LỖI ===
+                            if (allowWrap) {
                                 cell.classList.add('whitespace-normal'); // Cho phép xuống dòng
                             } else {
                                 cell.classList.add('whitespace-nowrap'); // Giữ không xuống dòng
@@ -433,12 +389,10 @@
                         row.appendChild(createCell(formatVietnameseDateTime(incident.timestamp)));
                         row.appendChild(createCell(incident.pod_key));
                         row.appendChild(createSeverityCell(incident.severity));
-                        row.appendChild(createCell(incident.summary, true)); // Áp dụng line-clamp
-                        row.appendChild(createCell(incident.initial_reasons, true)); // Áp dụng line-clamp
+                        row.appendChild(createCell(incident.summary, true)); // Cho phép wrap
+                        row.appendChild(createCell(incident.initial_reasons, true)); // Cho phép wrap
                         incidentsTableBody.appendChild(row);
                     });
-
-                    // Bỏ phần vẽ Pie Charts
                 }
 
                 // Cập nhật phân trang
@@ -455,30 +409,13 @@
                 console.error('Lỗi trong quá trình fetch và xử lý sự cố:', error);
                 incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-red-500">Đã xảy ra lỗi khi tải dữ liệu sự cố: ${error.message}. Vui lòng thử lại hoặc kiểm tra console.</td></tr>`;
                 paginationControls.classList.add('hidden');
-                // Bỏ phần xử lý lỗi pie chart
             } finally {
                  hideLoading();
             }
         }
-         // === KẾT THÚC SỬA LỖI ===
 
-         // === Hàm mở Modal (Sửa lỗi Alpine) ===
-         async function openModal(incidentId) {
-             showLoading();
-             try {
-                 const response = await fetch(`/api/incidents/${incidentId}`);
-                 if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
-                 const incidentDetails = await response.json();
-                 if (incidentDetails.error) { throw new Error(`API Error: ${incidentDetails.error}`); }
-                 // Dùng $dispatch để gửi sự kiện cho Alpine
-                 document.dispatchEvent(new CustomEvent('open-incident-modal', { detail: incidentDetails }));
-             } catch (error) {
-                 console.error("Error fetching incident details:", error);
-                 alert(`Không thể tải chi tiết sự cố: ${error.message}`);
-             } finally {
-                 hideLoading();
-             }
-         }
+         // === BỎ Hàm mở Modal ===
+         // async function openModal(incidentId) { ... }
 
         // === Logic Theme Toggle (Giữ nguyên) ===
         function updateThemeIcon(theme) { /* ... */
@@ -502,18 +439,14 @@
 
         // === Event Listeners ===
         document.addEventListener('DOMContentLoaded', () => {
-            // === SỬA LỖI: Gọi setTodayDate sau khi DOM chắc chắn sẵn sàng ===
-            // setTodayDate(); // Tạm thời comment lại để tránh lỗi nếu DOM chưa sẵn sàng hoàn toàn
+            setTodayDate();
             const initialTheme = localStorage.getItem('theme') || 'system';
-            applyTheme(initialTheme); // Sẽ gọi fetchStats(1)
+            applyTheme(initialTheme);
             // Gọi fetchIncidents với ngày hôm nay
             const today = new Date();
             const startUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0, 0)).toISOString();
             const endUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 23, 59, 59, 999)).toISOString();
-            fetchIncidents(1, '', '', startUTC, endUTC); // Tải incidents của hôm nay
-             // Gọi setTodayDate ở đây sau khi mọi thứ đã load
-             setTodayDate();
-            // === KẾT THÚC SỬA LỖI ===
+            fetchIncidents(1, '', '', startUTC, endUTC);
         });
 
         refreshButton.addEventListener('click', () => {
