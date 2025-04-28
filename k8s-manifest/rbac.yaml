@@ -7,12 +7,14 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: k8s-log-agent-reader # Đổi tên ClusterRole
+  name: k8s-log-agent-reader # Giữ tên cũ hoặc đổi nếu muốn
 rules:
 - apiGroups: [""] # Core API group
-  resources: ["pods", "nodes", "events"]
-  verbs: ["get", "list", "watch"] # Quyền cần thiết
-- apiGroups: ["metrics.k8s.io"] # API group cho metrics (tùy chọn)
+  # Thêm "namespaces" vào resources
+  resources: ["pods", "nodes", "events", "namespaces"] # <<< Đã thêm namespaces
+  # Giữ nguyên verbs chỉ đọc
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["metrics.k8s.io"]
   resources: ["pods", "nodes"]
   verbs: ["get", "list"]
 ---

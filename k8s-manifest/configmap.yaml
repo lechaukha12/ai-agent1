@@ -9,17 +9,21 @@ data:
   LOKI_SCAN_RANGE_MINUTES: "1"
   LOKI_DETAIL_LOG_RANGE_MINUTES: "30"
   LOKI_QUERY_LIMIT: "500"
-  K8S_NAMESPACES: "kube-system,app-infra,alfinac-bee-logistics"
+  # --- BỎ K8S_NAMESPACES ---
+  # K8S_NAMESPACES: "kube-system,app-infra,alfinac-bee-logistics"
+  # --- THÊM EXCLUDED_NAMESPACES (Tùy chọn) ---
+  # Liệt kê các namespace không muốn quét, cách nhau bởi dấu phẩy
+  # Ví dụ: loại bỏ các namespace hệ thống ít quan trọng
+  EXCLUDED_NAMESPACES: "kube-node-lease,kube-public"
+  # --- KẾT THÚC THAY ĐỔI ---
   LOKI_SCAN_MIN_LEVEL: "WARNING"
   ALERT_SEVERITY_LEVELS: "WARNING,ERROR,CRITICAL"
   RESTART_COUNT_THRESHOLD: "5"
-  GEMINI_MODEL_NAME: "gemini-1.5-flash"
+  GEMINI_MODEL_NAME: "gemini-1.5-flash" # Vẫn giữ nếu có thể fallback
   DB_PATH: "/data/agent_stats.db"
   STATS_UPDATE_INTERVAL_SECONDS: "300"
   LOCAL_GEMINI_ENDPOINT: "http://gemini-local-svc.kube-observability.svc.cluster.local:5000/generate"
-  USE_LOCAL_MODEL: "false"
-
-  # --- THÊM PROMPT TEMPLATE ---
+  USE_LOCAL_MODEL: "false" # Đang dùng Gemini thật
   PROMPT_TEMPLATE: |
     Phân tích tình huống của pod Kubernetes '{namespace}/{pod_name}'.
     **Ưu tiên xem xét ngữ cảnh Kubernetes** được cung cấp dưới đây vì nó có thể là lý do chính bạn được gọi.
@@ -39,4 +43,3 @@ data:
     --- END LOGS ---
 
     Chỉ trả lời bằng định dạng JSON với các khóa "severity" và "summary". Ví dụ: {{"severity": "CRITICAL", "summary": "Pod 'kube-system/oomkill-test-pod' bị Terminated với lý do OOMKilled và có Event OOMKilled gần đây. Cần kiểm tra giới hạn bộ nhớ và code ứng dụng."}}
-  # --- KẾT THÚC PROMPT TEMPLATE ---
