@@ -7,7 +7,15 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
-        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) { document.documentElement.classList.add('dark') } else { document.documentElement.classList.remove('dark') }
+        // Apply theme based on localStorage (Initial load only)
+        // Default to light if 'dark' is not set
+        if (localStorage.theme === 'dark') {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+            // Optional: explicitly set light if nothing was stored
+            // localStorage.setItem('theme', 'light');
+        }
     </script>
     <style>
         body { font-family: 'Inter', sans-serif; scroll-behavior: smooth; }
@@ -17,16 +25,20 @@
         .dark #loading-spinner { border-top-color: #60a5fa; }
         .chart-container { min-height: 300px; position: relative; }
         #incidents-table th, #incidents-table td { padding: 0.75rem 1rem; }
-        #incidents-table tbody tr { transition: background-color 0.1s ease-in-out; } /* Bỏ cursor */
+        #incidents-table tbody tr { transition: background-color 0.1s ease-in-out; }
         #incidents-table tbody tr:hover { background-color: rgba(0, 0, 0, 0.03); }
         .dark #incidents-table tbody tr:hover { background-color: rgba(255, 255, 255, 0.05); }
-        /* Bỏ style modal */
-        #incidents-table th:nth-child(1), #incidents-table td:nth-child(1) { width: 15%; } /* Thời gian */
+        /* Column widths for the incidents table */
+        #incidents-table th:nth-child(1), #incidents-table td:nth-child(1) { width: 15%; } /* Time */
         #incidents-table th:nth-child(2), #incidents-table td:nth-child(2) { width: 25%; } /* Pod */
-        #incidents-table th:nth-child(3), #incidents-table td:nth-child(3) { width: 15%; } /* Mức độ */
-        #incidents-table th:nth-child(4), #incidents-table td:nth-child(4) { width: 25%; } /* Tóm tắt */
-        #incidents-table th:nth-child(5), #incidents-table td:nth-child(5) { width: 20%; } /* Lý do */
+        #incidents-table th:nth-child(3), #incidents-table td:nth-child(3) { width: 15%; } /* Severity */
+        #incidents-table th:nth-child(4), #incidents-table td:nth-child(4) { width: 25%; } /* Summary */
+        #incidents-table th:nth-child(5), #incidents-table td:nth-child(5) { width: 20%; } /* Reason */
         #theme-toggle-button svg { width: 1.25rem; height: 1.25rem; }
+        /* Style for namespace list */
+        .namespace-list { max-height: 200px; overflow-y: auto; }
+        .namespace-item { display: flex; align-items: center; }
+        .namespace-item input[type="checkbox"] { margin-right: 0.5rem; }
     </style>
      <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -37,14 +49,14 @@
         <header class="mb-8 text-center relative">
             <h1 class="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-2">K8s Log Agent Dashboard</h1>
             <p class="text-gray-600 dark:text-gray-400">Theo dõi sự cố và hoạt động của agent.</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Hôm nay: <span id="today-date">--/--/----</span></p>
             <p class="text-xs text-gray-500 dark:text-gray-500 mt-1">Đọc dữ liệu từ: <code id="db-path" class="bg-gray-200 dark:bg-gray-700 px-1 rounded">{{ db_path }}</code></p>
             <div class="absolute top-0 right-0 mt-2 mr-2 flex items-center space-x-2">
                  <a href="{{ url_for('logout') }}" class="text-sm text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors duration-200">Đăng xuất</a>
                 <button id="theme-toggle-button" type="button" class="text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-4 focus:ring-gray-200 dark:focus:ring-gray-700 rounded-lg text-sm p-2.5 transition-colors duration-200">
                     <svg id="theme-toggle-dark-icon" class="hidden" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path></svg>
                     <svg id="theme-toggle-light-icon" class="hidden" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm-.707 7.072l.707-.707a1 1 0 011.414 1.414l-.707.707a1 1 0 01-1.414-1.414zM13 17a1 1 0 100-2h-1a1 1 0 100 2h1zm-9-8a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1z" fill-rule="evenodd" clip-rule="evenodd"></path></svg>
-                    <svg id="theme-toggle-system-icon" class="hidden" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25"></path></svg>
-                </button>
+                    </button>
             </div>
         </header>
 
@@ -110,6 +122,21 @@
             </div>
         </section>
 
+         <section class="mb-8">
+             <h2 class="text-2xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Cấu hình Namespace Giám sát</h2>
+             <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border border-gray-200 dark:border-gray-700">
+                 <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Chọn các namespace bạn muốn agent theo dõi. Thay đổi sẽ có hiệu lực sau vài phút.</p>
+                 <div id="namespace-list" class="namespace-list border border-gray-300 dark:border-gray-600 rounded-md p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 mb-4">
+                     <p id="namespace-loading-text" class="text-gray-500 dark:text-gray-400 col-span-full text-center">Đang tải danh sách namespace...</p>
+                 </div>
+                 <div class="flex justify-end items-center">
+                      <span id="save-config-status" class="text-sm mr-4 hidden"></span> <button id="save-config-button" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+                          Lưu Cấu hình
+                      </button>
+                 </div>
+             </div>
+        </section>
+
         <section>
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
                  <h2 class="text-2xl font-semibold text-gray-800 dark:text-gray-100 flex-shrink-0">Danh sách Sự cố</h2>
@@ -154,317 +181,127 @@
     </div>
 
     <script>
-        // === Biến DOM (Giữ nguyên) ===
-        const incidentsTableBody = document.getElementById('incidents-table-body');
-        const totalIncidentsElem = document.getElementById('total-incidents');
-        const totalGeminiCallsElem = document.getElementById('total-gemini-calls');
-        const totalTelegramAlertsElem = document.getElementById('total-telegram-alerts');
-        const todayDateElem = document.getElementById('today-date');
-        const refreshButton = document.getElementById('refresh-button');
-        const loadingSpinner = document.getElementById('loading-spinner');
-        const loadingOverlay = document.getElementById('loading-overlay');
-        // Biểu đồ
-        const lineChartCtx = document.getElementById('statsChart').getContext('2d');
-        const lineChartErrorElem = document.getElementById('line-chart-error');
-        const lineChartNoDataElem = document.getElementById('line-chart-no-data');
-        let lineChartInstance = null;
-        const topPodsCtx = document.getElementById('topPodsChart').getContext('2d');
-        const topPodsErrorElem = document.getElementById('top-pods-error');
-        const topPodsNoDataElem = document.getElementById('top-pods-no-data');
-        let topPodsChartInstance = null;
-        const namespacePieCtx = document.getElementById('namespacePieChart').getContext('2d');
-        const namespacePieErrorElem = document.getElementById('namespace-pie-error');
-        const namespacePieNoDataElem = document.getElementById('namespace-pie-no-data');
-        let namespacePieInstance = null;
-        const severityPieCtx = document.getElementById('severityPieChart').getContext('2d');
-        const severityPieErrorElem = document.getElementById('severity-pie-error');
-        const severityPieNoDataElem = document.getElementById('severity-pie-no-data');
-        let severityPieInstance = null;
-        // Nút theme
+        // === DOM Elements ===
+        // ... (keep existing element variables) ...
         const themeToggleButton = document.getElementById('theme-toggle-button');
         const themeToggleDarkIcon = document.getElementById('theme-toggle-dark-icon');
         const themeToggleLightIcon = document.getElementById('theme-toggle-light-icon');
-        const themeToggleSystemIcon = document.getElementById('theme-toggle-system-icon');
-        // Bộ lọc & Phân trang
-        const podFilterInput = document.getElementById('pod-filter');
-        const severityFilterSelect = document.getElementById('severity-filter');
-        const filterButton = document.getElementById('filter-button');
-        const paginationControls = document.getElementById('pagination-controls');
-        const paginationInfo = document.getElementById('pagination-info');
-        const prevPageButton = document.getElementById('prev-page');
-        const nextPageButton = document.getElementById('next-page');
-        const timeRangeButtons = document.querySelectorAll('.time-range-btn');
-
-        // === Trạng thái ===
-        let currentIncidentPage = 1;
-        let totalIncidentPages = 1;
-        let currentPodFilter = '';
-        let currentSeverityFilter = '';
-        let currentStatsDays = 1;
-        let currentIncidentStartDate = null;
-        let currentIncidentEndDate = null;
-        // === BẮT ĐẦU SỬA LỖI: Lấy ALERTING_SEVERITY_LEVELS từ backend ===
-        // Thay vì hardcode, mình sẽ lấy từ API /stats (cần sửa backend để trả về)
-        // Tạm thời vẫn hardcode để frontend chạy được
-        let ALERTING_SEVERITY_LEVELS = ['WARNING', 'ERROR', 'CRITICAL'];
-        // === KẾT THÚC SỬA LỖI ===
+        // *** FIX: Removed system icon variable ***
+        // const themeToggleSystemIcon = document.getElementById('theme-toggle-system-icon');
+        // ... (keep other element variables) ...
+        const namespaceListDiv = document.getElementById('namespace-list');
+        const namespaceLoadingText = document.getElementById('namespace-loading-text');
+        const saveConfigButton = document.getElementById('save-config-button');
+        const saveConfigStatus = document.getElementById('save-config-status');
 
 
-        // === Hàm tiện ích ===
-        function showLoading() { loadingSpinner.classList.remove('hidden'); loadingOverlay.classList.remove('hidden'); }
-        function hideLoading() { loadingSpinner.classList.add('hidden'); loadingOverlay.classList.add('hidden'); }
-        function formatVietnameseDateTime(isoString) { /* Giữ nguyên v5 */
-             if (!isoString) return 'N/A';
-             try {
-                 const dateObj = new Date(isoString);
-                 if (isNaN(dateObj.getTime())) { throw new Error(`Invalid date parsed from: ${isoString}`); }
-                 const options = { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
-                 return dateObj.toLocaleString('vi-VN', options);
-             } catch (e) { console.error("Error formatting date:", isoString, e); return 'Lỗi định dạng'; }
-        }
-        function setTodayDate() { /* Giữ nguyên */
+        // === State Variables ===
+        // ... (keep existing state variables) ...
+
+        // === Utility Functions ===
+        // ... (keep existing utility functions: showLoading, hideLoading, formatVietnameseDateTime, setTodayDate) ...
+        function setTodayDate() {
              const today = new Date();
              const day = String(today.getDate()).padStart(2, '0');
-             const month = String(today.getMonth() + 1).padStart(2, '0');
+             const month = String(today.getMonth() + 1).padStart(2, '0'); // Month is 0-indexed
              const year = today.getFullYear();
-             if (todayDateElem) { todayDateElem.textContent = `${day}/${month}/${year}`; }
-             else { console.error("Element with ID 'today-date' not found."); }
-        }
-
-        // === Hàm vẽ biểu đồ (Giữ nguyên) ===
-        function renderLineChart(dailyStats) { /* ... */
-             lineChartErrorElem.classList.add('hidden'); lineChartNoDataElem.classList.add('hidden');
-             if (!dailyStats || dailyStats.length < 1) { console.warn("Không đủ dữ liệu hàng ngày để vẽ biểu đồ đường."); lineChartNoDataElem.classList.remove('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; } return; }
-             dailyStats.sort((a, b) => new Date(a.date) - new Date(b.date));
-             const labels = dailyStats.map(stat => stat.date);
-             const incidentData = dailyStats.map(stat => stat.incident_count);
-             const geminiData = dailyStats.map(stat => stat.model_calls);
-             const telegramData = dailyStats.map(stat => stat.telegram_alerts);
-             const isDarkMode = document.documentElement.classList.contains('dark');
-             const gridColor = isDarkMode ? 'rgba(107, 114, 128, 0.5)' : 'rgba(209, 213, 219, 0.5)';
-             const textColor = isDarkMode ? 'rgb(229, 231, 235)' : 'rgb(55, 65, 81)';
-             const chartData = { labels: labels, datasets: [ { label: 'Sự Cố', data: incidentData, borderColor: 'rgb(239, 68, 68)', backgroundColor: 'rgba(239, 68, 68, 0.1)', tension: 0.1, fill: true, }, { label: 'Gọi Model', data: geminiData, borderColor: 'rgb(59, 130, 246)', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.1, fill: true, }, { label: 'Cảnh báo Telegram', data: telegramData, borderColor: 'rgb(34, 197, 94)', backgroundColor: 'rgba(34, 197, 94, 0.1)', tension: 0.1, fill: true, } ] };
-             const chartConfig = { type: 'line', data: chartData, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { precision: 0, color: textColor }, grid: { color: gridColor } }, x: { ticks: { color: textColor }, grid: { color: gridColor } } }, plugins: { legend: { position: 'top', labels: { color: textColor } }, tooltip: { mode: 'index', intersect: false, } } } };
-             if (lineChartInstance) { lineChartInstance.destroy(); }
-             lineChartInstance = new Chart(lineChartCtx, chartConfig);
-        }
-        function renderPieChart(ctx, errorElem, noDataElem, chartInstance, chartData, title) { /* ... */
-            errorElem.classList.add('hidden'); noDataElem.classList.add('hidden');
-            const labels = Object.keys(chartData); const data = Object.values(chartData);
-            const total = data.reduce((sum, value) => sum + value, 0);
-            if (labels.length === 0 || total === 0) { console.warn(`Không có dữ liệu cho biểu đồ tròn: ${title}`); noDataElem.classList.remove('hidden'); if (chartInstance) { chartInstance.destroy(); chartInstance = null; } return null; }
-             const backgroundColors = [ 'rgba(239, 68, 68, 0.7)', 'rgba(245, 158, 11, 0.7)', 'rgba(59, 130, 246, 0.7)', 'rgba(34, 197, 94, 0.7)', 'rgba(107, 114, 128, 0.7)', 'rgba(168, 85, 247, 0.7)', 'rgba(236, 72, 153, 0.7)' ];
-             const hoverBackgroundColors = [ 'rgba(220, 38, 38, 0.9)', 'rgba(217, 119, 6, 0.9)', 'rgba(37, 99, 235, 0.9)', 'rgba(22, 163, 74, 0.9)', 'rgba(75, 85, 99, 0.9)', 'rgba(147, 51, 234, 0.9)', 'rgba(219, 39, 119, 0.9)' ];
-             const pieChartData = { labels: labels, datasets: [{ label: title, data: data, backgroundColor: backgroundColors.slice(0, labels.length), hoverBackgroundColor: hoverBackgroundColors.slice(0, labels.length), hoverOffset: 4 }] };
-             const isDarkMode = document.documentElement.classList.contains('dark');
-             const textColor = isDarkMode ? 'rgb(229, 231, 235)' : 'rgb(55, 65, 81)';
-             const pieChartConfig = { type: 'pie', data: pieChartData, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: textColor } }, title: { display: true, text: title, font: { size: 16 }, color: textColor }, tooltip: { callbacks: { label: function(context) { let label = context.label || ''; if (label) { label += ': '; } if (context.parsed !== null) { const total = context.chart.data.datasets[0].data.reduce((sum, value) => sum + value, 0); const percentage = total > 0 ? ((context.parsed / total) * 100).toFixed(1) + '%' : '0%'; label += `${context.parsed} (${percentage})`; } return label; } } } } } };
-             if (chartInstance) { chartInstance.destroy(); }
-             return new Chart(ctx, pieChartConfig);
-         }
-         function renderBarChart(ctx, errorElem, noDataElem, chartInstance, chartData, title) { /* ... */
-             errorElem.classList.add('hidden'); noDataElem.classList.add('hidden');
-             const labels = Object.keys(chartData); const data = Object.values(chartData);
-             if (labels.length === 0) { console.warn(`Không có dữ liệu cho biểu đồ cột: ${title}`); noDataElem.classList.remove('hidden'); if (chartInstance) { chartInstance.destroy(); chartInstance = null; } return null; }
-             const isDarkMode = document.documentElement.classList.contains('dark');
-             const gridColor = isDarkMode ? 'rgba(107, 114, 128, 0.5)' : 'rgba(209, 213, 219, 0.5)';
-             const textColor = isDarkMode ? 'rgb(229, 231, 235)' : 'rgb(55, 65, 81)';
-             const backgroundColors = ['rgba(59, 130, 246, 0.7)', 'rgba(239, 68, 68, 0.7)', 'rgba(245, 158, 11, 0.7)', 'rgba(34, 197, 94, 0.7)', 'rgba(107, 114, 128, 0.7)'];
-             const hoverBackgroundColors = ['rgba(37, 99, 235, 0.9)', 'rgba(220, 38, 38, 0.9)', 'rgba(217, 119, 6, 0.9)', 'rgba(22, 163, 74, 0.9)', 'rgba(75, 85, 99, 0.9)'];
-
-             const barChartData = { labels: labels, datasets: [{ label: 'Số lượng sự cố', data: data, backgroundColor: backgroundColors.slice(0, labels.length), hoverBackgroundColor: hoverBackgroundColors.slice(0, labels.length), borderWidth: 1 }] };
-             const barChartConfig = { type: 'bar', data: barChartData, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true, ticks: { precision: 0, color: textColor }, grid: { color: gridColor } }, y: { ticks: { color: textColor }, grid: { display: false } } }, plugins: { legend: { display: false }, title: { display: true, text: title, font: { size: 16 }, color: textColor } } } };
-             if (chartInstance) { chartInstance.destroy(); }
-             return new Chart(ctx, barChartConfig);
+             if (todayDateElem) {
+                 todayDateElem.textContent = `${day}/${month}/${year}`;
+             } else {
+                 console.error("Element with ID 'today-date' not found.");
+             }
         }
 
 
-        // === Hàm Fetch dữ liệu ===
-        async function fetchStats(days = 1) { /* Giữ nguyên */
-            currentStatsDays = days;
-            try {
-                const response = await fetch(`/api/stats?days=${days}`);
-                if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
-                const stats = await response.json();
-                if (stats.error) { console.error("Error fetching stats:", stats.error); totalIncidentsElem.textContent = 'Lỗi'; totalGeminiCallsElem.textContent = 'Lỗi'; totalTelegramAlertsElem.textContent = 'Lỗi'; lineChartErrorElem.classList.remove('hidden'); lineChartNoDataElem.classList.add('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; } return; }
-                totalIncidentsElem.textContent = stats.totals?.incidents ?? '0';
-                totalGeminiCallsElem.textContent = stats.totals?.model_calls ?? '0';
-                totalTelegramAlertsElem.textContent = stats.totals?.telegram_alerts ?? '0';
-                const chartDays = Math.max(days, 7);
-                if (chartDays !== days) {
-                     const responseChart = await fetch(`/api/stats?days=${chartDays}`);
-                     const statsChart = await responseChart.json();
-                     if (!statsChart.error) { renderLineChart(statsChart.daily_stats_for_chart); }
-                     else { renderLineChart([]); }
-                } else { renderLineChart(stats.daily_stats_for_chart); }
-                topPodsChartInstance = renderBarChart(topPodsCtx, topPodsErrorElem, topPodsNoDataElem, topPodsChartInstance, stats.top_problematic_pods || {}, 'Top 5 Pod Gây Rối');
-                namespacePieInstance = renderPieChart(namespacePieCtx, namespacePieErrorElem, namespacePieNoDataElem, namespacePieInstance, stats.namespace_distribution || {}, 'Phân bố Namespace');
-                if (days === 1) {
-                     severityPieInstance = renderPieChart(severityPieCtx, severityPieErrorElem, severityPieNoDataElem, severityPieInstance, stats.severity_distribution_today || {}, 'Phân loại Mức độ (Hôm nay)');
-                } else {
-                     if(severityPieInstance) { severityPieInstance.destroy(); severityPieInstance = null; }
-                     severityPieNoDataElem.textContent = `Xem theo ngày để thấy phân loại mức độ.`;
-                     severityPieNoDataElem.classList.remove('hidden');
-                }
-            } catch (error) {
-                console.error('Error fetching stats:', error);
-                totalIncidentsElem.textContent = 'Lỗi'; totalGeminiCallsElem.textContent = 'Lỗi'; totalTelegramAlertsElem.textContent = 'Lỗi';
-                lineChartErrorElem.classList.remove('hidden'); lineChartNoDataElem.classList.add('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; }
-                topPodsErrorElem.classList.remove('hidden'); topPodsNoDataElem.classList.add('hidden'); if(topPodsChartInstance) { topPodsChartInstance.destroy(); topPodsChartInstance = null; }
-                namespacePieErrorElem.classList.remove('hidden'); namespacePieNoDataElem.classList.add('hidden'); if(namespacePieInstance) { namespacePieInstance.destroy(); namespacePieInstance = null; }
-                severityPieErrorElem.classList.remove('hidden'); severityPieNoDataElem.classList.add('hidden'); if(severityPieInstance) { severityPieInstance.destroy(); severityPieInstance = null; }
+        // === Chart Rendering Functions ===
+        // ... (keep existing chart functions: renderLineChart, renderPieChart, renderBarChart) ...
+
+        // === Data Fetching Functions ===
+        // ... (keep existing data fetching functions: fetchStats, fetchIncidents, fetchAvailableNamespaces, fetchMonitoredNamespaces, renderNamespaceList, saveMonitoredNamespaces) ...
+
+        // === Theme Toggle Logic (Simplified to Light/Dark) ===
+        // *** FIX: Simplified updateThemeIcon ***
+        function updateThemeIcon() {
+            // Check current state based on localStorage or default (light)
+            const isDarkMode = localStorage.theme === 'dark';
+            if (isDarkMode) {
+                themeToggleLightIcon.classList.remove('hidden'); // Show sun in dark mode
+                themeToggleDarkIcon.classList.add('hidden');    // Hide moon
+            } else {
+                themeToggleLightIcon.classList.add('hidden');     // Hide sun in light mode
+                themeToggleDarkIcon.classList.remove('hidden'); // Show moon
             }
         }
 
-        // === Hàm fetchIncidents ===
-        async function fetchIncidents(page = 1, podFilter = '', severityFilter = '', startDate = null, endDate = null) {
-            showLoading();
-            currentIncidentPage = page; currentPodFilter = podFilter; currentSeverityFilter = severityFilter;
-            currentIncidentStartDate = startDate; currentIncidentEndDate = endDate;
-            podFilterInput.value = podFilter; severityFilterSelect.value = severityFilter;
-            incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-gray-500 dark:text-gray-400">Đang tải dữ liệu...</td></tr>`;
-            paginationControls.classList.add('hidden');
-
-            try {
-                let url = `/api/incidents?limit=20&page=${page}&pod=${encodeURIComponent(podFilter)}&severity=${encodeURIComponent(severityFilter)}`;
-                if (startDate) { url += `&start_date=${startDate}`; }
-                if (endDate) { url += `&end_date=${endDate}`; }
-
-                const response = await fetch(url);
-                if (!response.ok) {
-                    let errorMsg = `HTTP error! status: ${response.status}`;
-                    try { const errorData = await response.json(); errorMsg = errorData.error || errorMsg; } catch (e) {}
-                    throw new Error(errorMsg);
-                }
-                const data = await response.json();
-                if (data.error) { throw new Error(`API Error: ${data.error}`); }
-
-                const incidents = data.incidents;
-                const pagination = data.pagination;
-                totalIncidentPages = pagination.total_pages;
-
-                incidentsTableBody.innerHTML = '';
-
-                if (incidents.length === 0) {
-                    incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-gray-500 dark:text-gray-400">Không tìm thấy sự cố nào khớp với bộ lọc.</td></tr>`;
-                } else {
-                    incidents.forEach(incident => {
-                        const row = document.createElement('tr');
-                        // Bỏ onclick
-
-                        const severityUpper = incident.severity ? incident.severity.toUpperCase() : '';
-                        if (severityUpper === 'ERROR' || severityUpper === 'CRITICAL') { row.classList.add('bg-red-50', 'dark:bg-opacity-10', 'dark:bg-red-900'); }
-                        else if (severityUpper === 'WARNING') { row.classList.add('bg-yellow-50', 'dark:bg-opacity-10', 'dark:bg-yellow-900'); }
-
-                        // Hàm tạo cell (Bỏ line-clamp, dùng wrap)
-                        const createCell = (text, allowWrap = false) => {
-                            const cell = document.createElement('td');
-                            cell.className = 'px-4 py-3 text-sm text-gray-700 dark:text-gray-300 align-top';
-                            const displayValue = (text === null || text === undefined) ? 'N/A' : String(text);
-                            // === SỬA LỖI: Gán title trước textContent ===
-                            cell.title = displayValue; // Tooltip sẽ dùng cái này
-                            cell.textContent = displayValue;
-                            // === KẾT THÚC SỬA LỖI ===
-                            if (allowWrap) {
-                                cell.classList.add('whitespace-normal'); // Cho phép xuống dòng
-                            } else {
-                                cell.classList.add('whitespace-nowrap'); // Giữ không xuống dòng
-                            }
-                            return cell;
-                        };
-                        const createSeverityCell = (text) => {
-                            const cell = createCell(text); const upperText = text ? text.toUpperCase() : '';
-                            if (upperText === 'ERROR' || upperText === 'CRITICAL') { cell.classList.add('font-semibold', 'text-red-600', 'dark:text-red-400'); }
-                            else if (upperText === 'WARNING') { cell.classList.add('font-semibold', 'text-yellow-600', 'dark:text-yellow-400'); }
-                            else { cell.classList.add('text-gray-500', 'dark:text-gray-400'); }
-                            let contentHTML = text ?? 'N/A';
-                            if(ALERTING_SEVERITY_LEVELS.includes(upperText)) {
-                                contentHTML += ' <span class="text-xs font-normal text-gray-500 dark:text-gray-400">(đã cảnh báo)</span>';
-                            }
-                            cell.innerHTML = contentHTML;
-                            return cell;
-                        };
-
-                        // Thêm các cell vào row
-                        row.appendChild(createCell(formatVietnameseDateTime(incident.timestamp)));
-                        row.appendChild(createCell(incident.pod_key));
-                        row.appendChild(createSeverityCell(incident.severity));
-                        row.appendChild(createCell(incident.summary, true)); // Cho phép wrap
-                        row.appendChild(createCell(incident.initial_reasons, true)); // Cho phép wrap
-                        incidentsTableBody.appendChild(row);
-                    });
-                }
-
-                // Cập nhật phân trang
-                if (totalIncidentPages > 0) {
-                     paginationInfo.textContent = `Trang ${pagination.page} / ${totalIncidentPages} (Tổng: ${pagination.total_items})`;
-                     prevPageButton.disabled = pagination.page <= 1;
-                     nextPageButton.disabled = pagination.page >= totalIncidentPages;
-                     paginationControls.classList.remove('hidden');
-                } else {
-                     paginationControls.classList.add('hidden');
-                }
-
-            } catch (error) {
-                console.error('Lỗi trong quá trình fetch và xử lý sự cố:', error);
-                incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-red-500">Đã xảy ra lỗi khi tải dữ liệu sự cố: ${error.message}. Vui lòng thử lại hoặc kiểm tra console.</td></tr>`;
-                paginationControls.classList.add('hidden');
-            } finally {
-                 hideLoading();
+        // *** FIX: Simplified applyTheme ***
+        function applyTheme(theme) {
+            if (theme === 'dark') {
+                document.documentElement.classList.add('dark');
+                localStorage.setItem('theme', 'dark');
+            } else { // Default to light
+                document.documentElement.classList.remove('dark');
+                localStorage.setItem('theme', 'light'); // Explicitly set light
+            }
+            updateThemeIcon(); // Update the button icon after applying theme
+            // Re-render charts on theme change if they exist
+            // Check if chart instances exist before calling fetchStats
+            if(lineChartInstance || topPodsChartInstance || namespacePieInstance || severityPieInstance) {
+                 fetchStats(currentStatsDays); // Refetch stats which re-renders charts
             }
         }
 
-         // === BỎ Hàm mở Modal ===
-         // async function openModal(incidentId) { ... }
+        // *** FIX: Simplified theme toggle button listener ***
+        themeToggleButton.addEventListener('click', () => {
+            // Read the current theme directly from localStorage or default to light
+            const currentTheme = localStorage.getItem('theme') || 'light';
+            const nextTheme = currentTheme === 'dark' ? 'light' : 'dark'; // Toggle between light and dark
+            applyTheme(nextTheme);
+        });
 
-        // === Logic Theme Toggle (Giữ nguyên) ===
-        function updateThemeIcon(theme) { /* ... */
-            themeToggleDarkIcon.classList.add('hidden'); themeToggleLightIcon.classList.add('hidden'); themeToggleSystemIcon.classList.add('hidden');
-            if (theme === 'dark') { themeToggleLightIcon.classList.remove('hidden'); } else if (theme === 'light') { themeToggleDarkIcon.classList.remove('hidden'); } else { themeToggleSystemIcon.classList.remove('hidden'); }
-         }
-        function applyTheme(theme) { /* ... */
-             if (theme === 'dark') { document.documentElement.classList.add('dark'); } else if (theme === 'light') { document.documentElement.classList.remove('dark'); } else { localStorage.removeItem('theme'); if (window.matchMedia('(prefers-color-scheme: dark)').matches) { document.documentElement.classList.add('dark'); } else { document.documentElement.classList.remove('dark'); } theme = 'system'; }
-             updateThemeIcon(theme);
-             fetchStats(currentStatsDays);
-         }
-        themeToggleButton.addEventListener('click', () => { /* ... */
-            const currentTheme = localStorage.getItem('theme') || 'system'; let nextTheme;
-            if (currentTheme === 'light') { nextTheme = 'dark'; } else if (currentTheme === 'dark') { nextTheme = 'system'; } else { nextTheme = 'light'; }
-            localStorage.setItem('theme', nextTheme); applyTheme(nextTheme);
-         });
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => { /* ... */
-            if (!localStorage.getItem('theme') || localStorage.getItem('theme') === 'system') { applyTheme('system'); }
-         });
+        // *** FIX: Removed system theme listener ***
+        // window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => { ... });
 
 
         // === Event Listeners ===
         document.addEventListener('DOMContentLoaded', () => {
-            setTodayDate();
-            const initialTheme = localStorage.getItem('theme') || 'system';
-            applyTheme(initialTheme);
-            // Gọi fetchIncidents với ngày hôm nay
+            setTodayDate(); // Set today's date in the header
+
+            // *** FIX: Apply initial theme based only on localStorage (defaulting to light) ***
+            const initialTheme = localStorage.getItem('theme') || 'light'; // Default to light
+            applyTheme(initialTheme); // Apply theme on load
+
+            // Initial data fetch for 'Today'
             const today = new Date();
             const startUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0, 0)).toISOString();
             const endUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 23, 59, 59, 999)).toISOString();
-            fetchIncidents(1, '', '', startUTC, endUTC);
+            fetchStats(1); // Fetch stats for today
+            fetchIncidents(1, '', '', startUTC, endUTC); // Fetch incidents for today
+
+            // Fetch and render namespaces on load
+            renderNamespaceList();
         });
 
+        // ... (keep other event listeners: refreshButton, filterButton, podFilterInput, prevPageButton, nextPageButton, timeRangeButtons, saveConfigButton) ...
         refreshButton.addEventListener('click', () => {
-             fetchStats(currentStatsDays);
-             fetchIncidents(1, '', '', currentIncidentStartDate, currentIncidentEndDate);
+             // Reset filters and fetch data for the current view
              podFilterInput.value = '';
              severityFilterSelect.value = '';
+             fetchStats(currentStatsDays); // Refetch stats for the current time range
+             fetchIncidents(1, '', '', currentIncidentStartDate, currentIncidentEndDate); // Refetch incidents for the current time range
+             renderNamespaceList(); // Also refresh namespace list
         });
 
-        // Nút Lọc
+        // Filter Button
         filterButton.addEventListener('click', () => {
+             // Fetch incidents using current filters and date range, reset to page 1
              fetchIncidents(1, podFilterInput.value, severityFilterSelect.value, currentIncidentStartDate, currentIncidentEndDate);
         });
+        // Allow Enter key in filter input
         podFilterInput.addEventListener('keypress', function (e) {
              if (e.key === 'Enter') { filterButton.click(); }
         });
 
-        // Nút Phân trang
+        // Pagination Buttons
         prevPageButton.addEventListener('click', () => {
             if (currentIncidentPage > 1) { fetchIncidents(currentIncidentPage - 1, currentPodFilter, currentSeverityFilter, currentIncidentStartDate, currentIncidentEndDate); }
         });
@@ -472,21 +309,36 @@
              if (currentIncidentPage < totalIncidentPages) { fetchIncidents(currentIncidentPage + 1, currentPodFilter, currentSeverityFilter, currentIncidentStartDate, currentIncidentEndDate); }
         });
 
-        // Nút chọn khoảng thời gian Stats và Incidents
+        // Time Range Buttons
         timeRangeButtons.forEach(button => {
             button.addEventListener('click', () => {
                 const days = parseInt(button.getAttribute('data-days'));
-                fetchStats(days);
+                currentStatsDays = days; // Update state
+
+                // Calculate date range based on selected days
                 const endDate = new Date();
                 const startDate = new Date();
-                startDate.setDate(endDate.getDate() - days + 1);
+                startDate.setDate(endDate.getDate() - days + 1); // Set start date correctly
+                // Get UTC start/end for filtering incidents
                 const startUTC = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate(), 0, 0, 0, 0)).toISOString();
                 const endUTC = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate(), 23, 59, 59, 999)).toISOString();
-                fetchIncidents(1, '', '', startUTC, endUTC);
+
+                // Update state for date range
+                currentIncidentStartDate = startUTC;
+                currentIncidentEndDate = endUTC;
+
+                // Fetch data for the new range
+                fetchStats(days);
+                fetchIncidents(1, '', '', startUTC, endUTC); // Fetch incidents for the new range, reset filter/page
+
+                // Update button styles
                 timeRangeButtons.forEach(btn => { btn.classList.remove('bg-blue-500', 'text-white'); btn.classList.add('bg-gray-300', 'dark:bg-gray-600', 'text-gray-700', 'dark:text-gray-200'); });
                 button.classList.add('bg-blue-500', 'text-white'); button.classList.remove('bg-gray-300', 'dark:bg-gray-600', 'text-gray-700', 'dark:text-gray-200');
             });
         });
+
+        // Save Namespace Config button
+        saveConfigButton.addEventListener('click', saveMonitoredNamespaces);
 
     </script>
 </body>

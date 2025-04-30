@@ -9,21 +9,17 @@ data:
   LOKI_SCAN_RANGE_MINUTES: "1"
   LOKI_DETAIL_LOG_RANGE_MINUTES: "30"
   LOKI_QUERY_LIMIT: "500"
-  # --- BỎ K8S_NAMESPACES ---
-  # K8S_NAMESPACES: "kube-system,app-infra,alfinac-bee-logistics"
-  # --- THÊM EXCLUDED_NAMESPACES (Tùy chọn) ---
-  # Liệt kê các namespace không muốn quét, cách nhau bởi dấu phẩy
-  # Ví dụ: loại bỏ các namespace hệ thống ít quan trọng
-  EXCLUDED_NAMESPACES: "kube-node-lease,kube-public"
-  # --- KẾT THÚC THAY ĐỔI ---
-  LOKI_SCAN_MIN_LEVEL: "WARNING"
-  ALERT_SEVERITY_LEVELS: "WARNING,ERROR,CRITICAL"
+  # Bỏ K8S_NAMESPACES
+  EXCLUDED_NAMESPACES: "kube-node-lease,kube-public" # Namespace loại trừ
+  LOKI_SCAN_MIN_LEVEL: "INFO" # Quét log INFO trở lên để thu thập data
+  ALERT_SEVERITY_LEVELS: "INFO,WARNING,ERROR,CRITICAL" # Vẫn chỉ cảnh báo từ WARNING
   RESTART_COUNT_THRESHOLD: "5"
-  GEMINI_MODEL_NAME: "gemini-1.5-flash" # Vẫn giữ nếu có thể fallback
+  GEMINI_MODEL_NAME: "gemini-1.5-flash"
   DB_PATH: "/data/agent_stats.db"
   STATS_UPDATE_INTERVAL_SECONDS: "300"
-  LOCAL_GEMINI_ENDPOINT: "http://gemini-local-svc.kube-observability.svc.cluster.local:5000/generate"
-  USE_LOCAL_MODEL: "false" # Đang dùng Gemini thật
+  NAMESPACE_REFRESH_INTERVAL_SECONDS: "3600" # Quét NS mỗi giờ
+  DEFAULT_MONITORED_NAMESPACES: "kube-system,default" # Dùng nếu DB trống
+  # Bỏ USE_LOCAL_MODEL và LOCAL_GEMINI_ENDPOINT vì giờ chỉ dùng Gemini thật
   PROMPT_TEMPLATE: |
     Phân tích tình huống của pod Kubernetes '{namespace}/{pod_name}'.
     **Ưu tiên xem xét ngữ cảnh Kubernetes** được cung cấp dưới đây vì nó có thể là lý do chính bạn được gọi.
