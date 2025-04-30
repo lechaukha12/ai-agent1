@@ -3,18 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>K8s Log Agent Dashboard v1.0.5</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>K8s Log Agent Dashboard v1.0.6</title> <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         // Apply theme based on localStorage (Initial load only)
-        // Default to light if 'dark' is not set
         if (localStorage.theme === 'dark') {
             document.documentElement.classList.add('dark');
         } else {
             document.documentElement.classList.remove('dark');
-            // Optional: explicitly set light if nothing was stored
-            // localStorage.setItem('theme', 'light');
         }
     </script>
     <style>
@@ -25,20 +21,46 @@
         .dark #loading-spinner { border-top-color: #60a5fa; }
         .chart-container { min-height: 300px; position: relative; }
         #incidents-table th, #incidents-table td { padding: 0.75rem 1rem; }
-        #incidents-table tbody tr { transition: background-color 0.1s ease-in-out; }
+        #incidents-table tbody tr { transition: background-color 0.1s ease-in-out; cursor: pointer; } /* Add cursor pointer */
         #incidents-table tbody tr:hover { background-color: rgba(0, 0, 0, 0.03); }
         .dark #incidents-table tbody tr:hover { background-color: rgba(255, 255, 255, 0.05); }
-        /* Column widths for the incidents table */
+        /* Column widths */
         #incidents-table th:nth-child(1), #incidents-table td:nth-child(1) { width: 15%; } /* Time */
         #incidents-table th:nth-child(2), #incidents-table td:nth-child(2) { width: 25%; } /* Pod */
         #incidents-table th:nth-child(3), #incidents-table td:nth-child(3) { width: 15%; } /* Severity */
         #incidents-table th:nth-child(4), #incidents-table td:nth-child(4) { width: 25%; } /* Summary */
         #incidents-table th:nth-child(5), #incidents-table td:nth-child(5) { width: 20%; } /* Reason */
         #theme-toggle-button svg { width: 1.25rem; height: 1.25rem; }
-        /* Style for namespace list */
         .namespace-list { max-height: 200px; overflow-y: auto; }
         .namespace-item { display: flex; align-items: center; }
         .namespace-item input[type="checkbox"] { margin-right: 0.5rem; }
+
+        /* v1.0.6: Modal Styles */
+        .modal-overlay {
+            position: fixed; inset: 0; background-color: rgba(0, 0, 0, 0.5);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 50; transition: opacity 0.3s ease;
+        }
+        .modal-content {
+            background-color: white; border-radius: 0.5rem; padding: 1.5rem;
+            max-width: 90%; width: 800px; /* Adjust width as needed */
+            max-height: 90vh; overflow-y: auto;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transform: scale(0.95); transition: transform 0.3s ease;
+        }
+        .dark .modal-content { background-color: #1f2937; } /* bg-gray-800 */
+        .modal-visible .modal-overlay { opacity: 1; pointer-events: auto; }
+        .modal-visible .modal-content { transform: scale(1); }
+        .modal-hidden .modal-overlay { opacity: 0; pointer-events: none; }
+        .modal-hidden .modal-content { transform: scale(0.95); }
+        .modal-section { margin-bottom: 1rem; }
+        .modal-label { font-weight: 600; color: #4b5563; margin-bottom: 0.25rem; display: block;} /* text-gray-600 */
+        .dark .modal-label { color: #d1d5db; } /* text-gray-300 */
+        .modal-value { font-family: monospace; white-space: pre-wrap; word-wrap: break-word; background-color: #f3f4f6; padding: 0.5rem; border-radius: 0.25rem; font-size: 0.875rem; max-height: 200px; overflow-y: auto; } /* bg-gray-100 */
+        .dark .modal-value { background-color: #374151; color: #e5e7eb; } /* bg-gray-700 text-gray-200 */
+        .modal-value-simple { font-size: 0.875rem; color: #1f2937; } /* text-gray-800 */
+        .dark .modal-value-simple { color: #f3f4f6; } /* text-gray-100 */
+        .modal-value-block { display: block; margin-top: 0.25rem; }
     </style>
      <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -56,7 +78,7 @@
                 <button id="theme-toggle-button" type="button" class="text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-4 focus:ring-gray-200 dark:focus:ring-gray-700 rounded-lg text-sm p-2.5 transition-colors duration-200">
                     <svg id="theme-toggle-dark-icon" class="hidden" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path></svg>
                     <svg id="theme-toggle-light-icon" class="hidden" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm-.707 7.072l.707-.707a1 1 0 011.414 1.414l-.707.707a1 1 0 01-1.414-1.414zM13 17a1 1 0 100-2h-1a1 1 0 100 2h1zm-9-8a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1z" fill-rule="evenodd" clip-rule="evenodd"></path></svg>
-                    </button>
+                </button>
             </div>
         </header>
 
@@ -180,30 +202,163 @@
 
     </div>
 
+    <div id="incident-modal" class="modal-hidden">
+        <div class="modal-overlay" id="modal-overlay">
+            <div class="modal-content" id="modal-content-area">
+                <div class="flex justify-between items-center mb-4 border-b pb-2 dark:border-gray-600">
+                    <h3 class="text-xl font-semibold text-gray-900 dark:text-white" id="modal-title">Chi tiết Sự cố</h3>
+                    <button id="modal-close-button" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <span class="modal-label">Thời gian</span>
+                        <span class="modal-value-simple modal-value-block" id="modal-timestamp"></span>
+                    </div>
+                    <div>
+                        <span class="modal-label">Pod</span>
+                        <span class="modal-value-simple modal-value-block" id="modal-pod-key"></span>
+                    </div>
+                     <div>
+                        <span class="modal-label">Mức độ</span>
+                        <span class="modal-value-simple modal-value-block" id="modal-severity"></span>
+                    </div>
+                     <div>
+                        <span class="modal-label">Lý do phát hiện ban đầu</span>
+                        <span class="modal-value-simple modal-value-block" id="modal-initial-reasons"></span>
+                    </div>
+                </div>
+
+                 <div class="modal-section">
+                    <span class="modal-label">Tóm tắt</span>
+                    <p class="modal-value-simple" id="modal-summary"></p>
+                </div>
+
+                 <div class="modal-section">
+                    <span class="modal-label">Nguyên nhân gốc có thể</span>
+                    <div class="modal-value" id="modal-root-cause"></div>
+                </div>
+
+                 <div class="modal-section">
+                    <span class="modal-label">Đề xuất khắc phục</span>
+                    <div class="modal-value" id="modal-troubleshooting-steps"></div>
+                </div>
+
+                <div class="modal-section">
+                    <span class="modal-label">Log mẫu</span>
+                    <div class="modal-value" id="modal-sample-logs"></div>
+                </div>
+
+                <div class="modal-section">
+                    <span class="modal-label">Ngữ cảnh Kubernetes</span>
+                    <div class="modal-value" id="modal-k8s-context"></div>
+                </div>
+
+                 <div class="modal-section">
+                    <span class="modal-label">Prompt đã gửi cho AI</span>
+                    <div class="modal-value" id="modal-input-prompt"></div>
+                </div>
+
+                 <div class="modal-section">
+                    <span class="modal-label">Phản hồi thô từ AI</span>
+                    <div class="modal-value" id="modal-raw-ai-response"></div>
+                </div>
+
+            </div>
+        </div>
+    </div>
     <script>
         // === DOM Elements ===
-        // ... (keep existing element variables) ...
+        const incidentsTableBody = document.getElementById('incidents-table-body');
+        const totalIncidentsElem = document.getElementById('total-incidents');
+        const totalGeminiCallsElem = document.getElementById('total-gemini-calls');
+        const totalTelegramAlertsElem = document.getElementById('total-telegram-alerts');
+        const todayDateElem = document.getElementById('today-date');
+        const refreshButton = document.getElementById('refresh-button');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        // Charts
+        const lineChartCtx = document.getElementById('statsChart').getContext('2d');
+        const lineChartErrorElem = document.getElementById('line-chart-error');
+        const lineChartNoDataElem = document.getElementById('line-chart-no-data');
+        let lineChartInstance = null;
+        const topPodsCtx = document.getElementById('topPodsChart').getContext('2d');
+        const topPodsErrorElem = document.getElementById('top-pods-error');
+        const topPodsNoDataElem = document.getElementById('top-pods-no-data');
+        let topPodsChartInstance = null;
+        const namespacePieCtx = document.getElementById('namespacePieChart').getContext('2d');
+        const namespacePieErrorElem = document.getElementById('namespace-pie-error');
+        const namespacePieNoDataElem = document.getElementById('namespace-pie-no-data');
+        let namespacePieInstance = null;
+        const severityPieCtx = document.getElementById('severityPieChart').getContext('2d');
+        const severityPieErrorElem = document.getElementById('severity-pie-error');
+        const severityPieNoDataElem = document.getElementById('severity-pie-no-data');
+        let severityPieInstance = null;
+        // Theme Toggle
         const themeToggleButton = document.getElementById('theme-toggle-button');
         const themeToggleDarkIcon = document.getElementById('theme-toggle-dark-icon');
         const themeToggleLightIcon = document.getElementById('theme-toggle-light-icon');
-        // *** FIX: Removed system icon variable ***
-        // const themeToggleSystemIcon = document.getElementById('theme-toggle-system-icon');
-        // ... (keep other element variables) ...
+        // Filters & Pagination
+        const podFilterInput = document.getElementById('pod-filter');
+        const severityFilterSelect = document.getElementById('severity-filter');
+        const filterButton = document.getElementById('filter-button');
+        const paginationControls = document.getElementById('pagination-controls');
+        const paginationInfo = document.getElementById('pagination-info');
+        const prevPageButton = document.getElementById('prev-page');
+        const nextPageButton = document.getElementById('next-page');
+        const timeRangeButtons = document.querySelectorAll('.time-range-btn');
+        // Namespace Config
         const namespaceListDiv = document.getElementById('namespace-list');
         const namespaceLoadingText = document.getElementById('namespace-loading-text');
         const saveConfigButton = document.getElementById('save-config-button');
         const saveConfigStatus = document.getElementById('save-config-status');
+        // v1.0.6: Modal Elements
+        const incidentModal = document.getElementById('incident-modal');
+        const modalOverlay = document.getElementById('modal-overlay');
+        const modalContentArea = document.getElementById('modal-content-area');
+        const modalCloseButton = document.getElementById('modal-close-button');
+        const modalTimestamp = document.getElementById('modal-timestamp');
+        const modalPodKey = document.getElementById('modal-pod-key');
+        const modalSeverity = document.getElementById('modal-severity');
+        const modalInitialReasons = document.getElementById('modal-initial-reasons');
+        const modalSummary = document.getElementById('modal-summary');
+        const modalRootCause = document.getElementById('modal-root-cause');
+        const modalTroubleshootingSteps = document.getElementById('modal-troubleshooting-steps');
+        const modalSampleLogs = document.getElementById('modal-sample-logs');
+        const modalK8sContext = document.getElementById('modal-k8s-context');
+        const modalInputPrompt = document.getElementById('modal-input-prompt');
+        const modalRawAiResponse = document.getElementById('modal-raw-ai-response');
 
 
         // === State Variables ===
-        // ... (keep existing state variables) ...
+        let currentIncidentPage = 1;
+        let totalIncidentPages = 1;
+        let currentPodFilter = '';
+        let currentSeverityFilter = '';
+        let currentStatsDays = 1;
+        let currentIncidentStartDate = null;
+        let currentIncidentEndDate = null;
+        const ALERTING_SEVERITY_LEVELS = ['WARNING', 'ERROR', 'CRITICAL'];
+        let incidentsDataCache = {}; // v1.0.6: Cache for incident details
 
         // === Utility Functions ===
-        // ... (keep existing utility functions: showLoading, hideLoading, formatVietnameseDateTime, setTodayDate) ...
+        function showLoading() { loadingSpinner.classList.remove('hidden'); loadingOverlay.classList.remove('hidden'); }
+        function hideLoading() { loadingSpinner.classList.add('hidden'); loadingOverlay.classList.add('hidden'); }
+        function formatVietnameseDateTime(isoString) {
+             if (!isoString) return 'N/A';
+             try {
+                 const dateObj = new Date(isoString);
+                 if (isNaN(dateObj.getTime())) { throw new Error(`Invalid date parsed from: ${isoString}`); }
+                 const options = { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Ho_Chi_Minh' };
+                 return dateObj.toLocaleString('vi-VN', options);
+             } catch (e) { console.error("Error formatting date:", isoString, e); return 'Lỗi định dạng'; }
+        }
         function setTodayDate() {
              const today = new Date();
              const day = String(today.getDate()).padStart(2, '0');
-             const month = String(today.getMonth() + 1).padStart(2, '0'); // Month is 0-indexed
+             const month = String(today.getMonth() + 1).padStart(2, '0');
              const year = today.getFullYear();
              if (todayDateElem) {
                  todayDateElem.textContent = `${day}/${month}/${year}`;
@@ -211,97 +366,365 @@
                  console.error("Element with ID 'today-date' not found.");
              }
         }
-
-
-        // === Chart Rendering Functions ===
-        // ... (keep existing chart functions: renderLineChart, renderPieChart, renderBarChart) ...
-
-        // === Data Fetching Functions ===
-        // ... (keep existing data fetching functions: fetchStats, fetchIncidents, fetchAvailableNamespaces, fetchMonitoredNamespaces, renderNamespaceList, saveMonitoredNamespaces) ...
-
-        // === Theme Toggle Logic (Simplified to Light/Dark) ===
-        // *** FIX: Simplified updateThemeIcon ***
-        function updateThemeIcon() {
-            // Check current state based on localStorage or default (light)
-            const isDarkMode = localStorage.theme === 'dark';
-            if (isDarkMode) {
-                themeToggleLightIcon.classList.remove('hidden'); // Show sun in dark mode
-                themeToggleDarkIcon.classList.add('hidden');    // Hide moon
-            } else {
-                themeToggleLightIcon.classList.add('hidden');     // Hide sun in light mode
-                themeToggleDarkIcon.classList.remove('hidden'); // Show moon
+        // Helper to safely set text content, handling null/undefined
+        function setText(element, text) {
+            if (element) {
+                element.textContent = (text === null || text === undefined || text === '') ? 'N/A' : text;
             }
         }
 
-        // *** FIX: Simplified applyTheme ***
+
+        // === Chart Rendering Functions ===
+        function renderLineChart(dailyStats) { /* ... no changes ... */
+             lineChartErrorElem.classList.add('hidden'); lineChartNoDataElem.classList.add('hidden');
+             if (!dailyStats || dailyStats.length < 1) { console.warn("Không đủ dữ liệu hàng ngày để vẽ biểu đồ đường."); lineChartNoDataElem.classList.remove('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; } return; }
+             dailyStats.sort((a, b) => new Date(a.date) - new Date(b.date));
+             const labels = dailyStats.map(stat => stat.date);
+             const incidentData = dailyStats.map(stat => stat.incident_count);
+             const geminiData = dailyStats.map(stat => stat.model_calls);
+             const telegramData = dailyStats.map(stat => stat.telegram_alerts);
+             const isDarkMode = document.documentElement.classList.contains('dark');
+             const gridColor = isDarkMode ? 'rgba(107, 114, 128, 0.5)' : 'rgba(209, 213, 219, 0.5)';
+             const textColor = isDarkMode ? 'rgb(229, 231, 235)' : 'rgb(55, 65, 81)';
+             const chartData = { labels: labels, datasets: [ { label: 'Sự Cố', data: incidentData, borderColor: 'rgb(239, 68, 68)', backgroundColor: 'rgba(239, 68, 68, 0.1)', tension: 0.1, fill: true, }, { label: 'Gọi Model', data: geminiData, borderColor: 'rgb(59, 130, 246)', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.1, fill: true, }, { label: 'Cảnh báo Telegram', data: telegramData, borderColor: 'rgb(34, 197, 94)', backgroundColor: 'rgba(34, 197, 94, 0.1)', tension: 0.1, fill: true, } ] };
+             const chartConfig = { type: 'line', data: chartData, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { precision: 0, color: textColor }, grid: { color: gridColor } }, x: { ticks: { color: textColor }, grid: { color: gridColor } } }, plugins: { legend: { position: 'top', labels: { color: textColor } }, tooltip: { mode: 'index', intersect: false, } } } };
+             if (lineChartInstance) { lineChartInstance.destroy(); }
+             lineChartInstance = new Chart(lineChartCtx, chartConfig);
+        }
+        function renderPieChart(ctx, errorElem, noDataElem, chartInstance, chartData, title) { /* ... no changes ... */
+            errorElem.classList.add('hidden'); noDataElem.classList.add('hidden');
+            const labels = Object.keys(chartData); const data = Object.values(chartData);
+            const total = data.reduce((sum, value) => sum + value, 0);
+            if (labels.length === 0 || total === 0) { console.warn(`Không có dữ liệu cho biểu đồ tròn: ${title}`); noDataElem.classList.remove('hidden'); if (chartInstance) { chartInstance.destroy(); chartInstance = null; } return null; }
+             const backgroundColors = [ 'rgba(239, 68, 68, 0.7)', 'rgba(245, 158, 11, 0.7)', 'rgba(59, 130, 246, 0.7)', 'rgba(34, 197, 94, 0.7)', 'rgba(107, 114, 128, 0.7)', 'rgba(168, 85, 247, 0.7)', 'rgba(236, 72, 153, 0.7)' ];
+             const hoverBackgroundColors = [ 'rgba(220, 38, 38, 0.9)', 'rgba(217, 119, 6, 0.9)', 'rgba(37, 99, 235, 0.9)', 'rgba(22, 163, 74, 0.9)', 'rgba(75, 85, 99, 0.9)', 'rgba(147, 51, 234, 0.9)', 'rgba(219, 39, 119, 0.9)' ];
+             const pieChartData = { labels: labels, datasets: [{ label: title, data: data, backgroundColor: backgroundColors.slice(0, labels.length), hoverBackgroundColor: hoverBackgroundColors.slice(0, labels.length), hoverOffset: 4 }] };
+             const isDarkMode = document.documentElement.classList.contains('dark');
+             const textColor = isDarkMode ? 'rgb(229, 231, 235)' : 'rgb(55, 65, 81)';
+             const pieChartConfig = { type: 'pie', data: pieChartData, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: textColor } }, title: { display: true, text: title, font: { size: 16 }, color: textColor }, tooltip: { callbacks: { label: function(context) { let label = context.label || ''; if (label) { label += ': '; } if (context.parsed !== null) { const total = context.chart.data.datasets[0].data.reduce((sum, value) => sum + value, 0); const percentage = total > 0 ? ((context.parsed / total) * 100).toFixed(1) + '%' : '0%'; label += `${context.parsed} (${percentage})`; } return label; } } } } } };
+             if (chartInstance) { chartInstance.destroy(); }
+             return new Chart(ctx, pieChartConfig);
+         }
+         function renderBarChart(ctx, errorElem, noDataElem, chartInstance, chartData, title) { /* ... no changes ... */
+             errorElem.classList.add('hidden'); noDataElem.classList.add('hidden');
+             const labels = Object.keys(chartData); const data = Object.values(chartData);
+             if (labels.length === 0) { console.warn(`Không có dữ liệu cho biểu đồ cột: ${title}`); noDataElem.classList.remove('hidden'); if (chartInstance) { chartInstance.destroy(); chartInstance = null; } return null; }
+             const isDarkMode = document.documentElement.classList.contains('dark');
+             const gridColor = isDarkMode ? 'rgba(107, 114, 128, 0.5)' : 'rgba(209, 213, 219, 0.5)';
+             const textColor = isDarkMode ? 'rgb(229, 231, 235)' : 'rgb(55, 65, 81)';
+             const backgroundColors = ['rgba(59, 130, 246, 0.7)', 'rgba(239, 68, 68, 0.7)', 'rgba(245, 158, 11, 0.7)', 'rgba(34, 197, 94, 0.7)', 'rgba(107, 114, 128, 0.7)'];
+             const hoverBackgroundColors = ['rgba(37, 99, 235, 0.9)', 'rgba(220, 38, 38, 0.9)', 'rgba(217, 119, 6, 0.9)', 'rgba(22, 163, 74, 0.9)', 'rgba(75, 85, 99, 0.9)'];
+
+             const barChartData = { labels: labels, datasets: [{ label: 'Số lượng sự cố', data: data, backgroundColor: backgroundColors.slice(0, labels.length), hoverBackgroundColor: hoverBackgroundColors.slice(0, labels.length), borderWidth: 1 }] };
+             const barChartConfig = { type: 'bar', data: barChartData, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true, ticks: { precision: 0, color: textColor }, grid: { color: gridColor } }, y: { ticks: { color: textColor }, grid: { display: false } } }, plugins: { legend: { display: false }, title: { display: true, text: title, font: { size: 16 }, color: textColor } } } };
+             if (chartInstance) { chartInstance.destroy(); }
+             return new Chart(ctx, barChartConfig);
+        }
+
+
+        // === Data Fetching Functions ===
+        async function fetchStats(days = 1) { /* ... no changes ... */
+            currentStatsDays = days;
+            try {
+                const response = await fetch(`/api/stats?days=${days}`);
+                if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
+                const stats = await response.json();
+                if (stats.error) { console.error("Error fetching stats:", stats.error); totalIncidentsElem.textContent = 'Lỗi'; totalGeminiCallsElem.textContent = 'Lỗi'; totalTelegramAlertsElem.textContent = 'Lỗi'; lineChartErrorElem.classList.remove('hidden'); lineChartNoDataElem.classList.add('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; } return; }
+                totalIncidentsElem.textContent = stats.totals?.incidents ?? '0';
+                totalGeminiCallsElem.textContent = stats.totals?.model_calls ?? '0';
+                totalTelegramAlertsElem.textContent = stats.totals?.telegram_alerts ?? '0';
+                const chartDays = Math.max(days, 7);
+                if (chartDays !== days) {
+                     const responseChart = await fetch(`/api/stats?days=${chartDays}`);
+                     if (!responseChart.ok) { throw new Error(`HTTP error fetching chart stats! status: ${responseChart.status}`); }
+                     const statsChart = await responseChart.json();
+                     if (!statsChart.error) { renderLineChart(statsChart.daily_stats_for_chart); }
+                     else { console.error("Error fetching chart stats:", statsChart.error); renderLineChart([]); }
+                } else {
+                     renderLineChart(stats.daily_stats_for_chart);
+                }
+                topPodsChartInstance = renderBarChart(topPodsCtx, topPodsErrorElem, topPodsNoDataElem, topPodsChartInstance, stats.top_problematic_pods || {}, 'Top 5 Pod Gây Rối');
+                namespacePieInstance = renderPieChart(namespacePieCtx, namespacePieErrorElem, namespacePieNoDataElem, namespacePieInstance, stats.namespace_distribution || {}, 'Phân bố Namespace');
+                if (days === 1) {
+                     severityPieInstance = renderPieChart(severityPieCtx, severityPieErrorElem, severityPieNoDataElem, severityPieInstance, stats.severity_distribution_today || {}, 'Phân loại Mức độ (Hôm nay)');
+                } else {
+                     if(severityPieInstance) { severityPieInstance.destroy(); severityPieInstance = null; }
+                     severityPieNoDataElem.textContent = `Xem theo ngày để thấy phân loại mức độ.`;
+                     severityPieNoDataElem.classList.remove('hidden');
+                     severityPieErrorElem.classList.add('hidden');
+                }
+            } catch (error) {
+                console.error('Error fetching stats:', error);
+                totalIncidentsElem.textContent = 'Lỗi'; totalGeminiCallsElem.textContent = 'Lỗi'; totalTelegramAlertsElem.textContent = 'Lỗi';
+                lineChartErrorElem.classList.remove('hidden'); lineChartNoDataElem.classList.add('hidden'); if (lineChartInstance) { lineChartInstance.destroy(); lineChartInstance = null; }
+                topPodsErrorElem.classList.remove('hidden'); topPodsNoDataElem.classList.add('hidden'); if(topPodsChartInstance) { topPodsChartInstance.destroy(); topPodsChartInstance = null; }
+                namespacePieErrorElem.classList.remove('hidden'); namespacePieNoDataElem.classList.add('hidden'); if(namespacePieInstance) { namespacePieInstance.destroy(); namespacePieInstance = null; }
+                severityPieErrorElem.classList.remove('hidden'); severityPieNoDataElem.classList.add('hidden'); if(severityPieInstance) { severityPieInstance.destroy(); severityPieInstance = null; }
+            }
+        }
+
+        async function fetchIncidents(page = 1, podFilter = '', severityFilter = '', startDate = null, endDate = null) {
+            showLoading();
+            currentIncidentPage = page; currentPodFilter = podFilter; currentSeverityFilter = severityFilter;
+            currentIncidentStartDate = startDate; currentIncidentEndDate = endDate;
+            podFilterInput.value = podFilter; severityFilterSelect.value = severityFilter;
+            incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-gray-500 dark:text-gray-400">Đang tải dữ liệu...</td></tr>`;
+            paginationControls.classList.add('hidden');
+            incidentsDataCache = {}; // v1.0.6: Clear cache on new fetch
+
+            try {
+                let url = `/api/incidents?limit=20&page=${page}&pod=${encodeURIComponent(podFilter)}&severity=${encodeURIComponent(severityFilter)}`;
+                if (startDate) { url += `&start_date=${startDate}`; }
+                if (endDate) { url += `&end_date=${endDate}`; }
+                const response = await fetch(url);
+                if (!response.ok) { let errorMsg = `HTTP error! status: ${response.status}`; try { const errorData = await response.json(); errorMsg = errorData.error || errorMsg; } catch (e) {} throw new Error(errorMsg); }
+                const data = await response.json();
+                if (data.error) { throw new Error(`API Error: ${data.error}`); }
+                const incidents = data.incidents; const pagination = data.pagination; totalIncidentPages = pagination.total_pages;
+                incidentsTableBody.innerHTML = '';
+                if (incidents.length === 0) { incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-gray-500 dark:text-gray-400">Không tìm thấy sự cố nào khớp với bộ lọc.</td></tr>`; }
+                else {
+                    incidents.forEach(incident => {
+                        incidentsDataCache[incident.id] = incident; // v1.0.6: Cache incident data by ID
+                        const row = document.createElement('tr');
+                        row.setAttribute('data-incident-id', incident.id); // v1.0.6: Add data attribute
+                        // v1.0.6: Add click listener to row
+                        row.addEventListener('click', () => openModal(incident.id));
+
+                        const severityUpper = incident.severity ? incident.severity.toUpperCase() : '';
+                        if (severityUpper === 'ERROR' || severityUpper === 'CRITICAL') { row.classList.add('bg-red-50', 'dark:bg-opacity-10', 'dark:bg-red-900'); }
+                        else if (severityUpper === 'WARNING') { row.classList.add('bg-yellow-50', 'dark:bg-opacity-10', 'dark:bg-yellow-900'); }
+
+                        const createCell = (text, allowWrap = false) => { const cell = document.createElement('td'); cell.className = 'px-4 py-3 text-sm text-gray-700 dark:text-gray-300 align-top'; const displayValue = (text === null || text === undefined) ? 'N/A' : String(text); cell.title = displayValue; cell.textContent = displayValue; if (allowWrap) { cell.classList.add('whitespace-normal'); } else { cell.classList.add('whitespace-nowrap', 'overflow-hidden', 'text-ellipsis'); } return cell; };
+                        const createSeverityCell = (text) => { const cell = createCell(text); const upperText = text ? text.toUpperCase() : ''; if (upperText === 'ERROR' || upperText === 'CRITICAL') { cell.classList.add('font-semibold', 'text-red-600', 'dark:text-red-400'); } else if (upperText === 'WARNING') { cell.classList.add('font-semibold', 'text-yellow-600', 'dark:text-yellow-400'); } else { cell.classList.add('text-gray-500', 'dark:text-gray-400'); } let contentHTML = text ?? 'N/A'; cell.innerHTML = contentHTML; return cell; };
+
+                        row.appendChild(createCell(formatVietnameseDateTime(incident.timestamp)));
+                        row.appendChild(createCell(incident.pod_key));
+                        row.appendChild(createSeverityCell(incident.severity));
+                        row.appendChild(createCell(incident.summary, true));
+                        row.appendChild(createCell(incident.initial_reasons, true));
+                        incidentsTableBody.appendChild(row);
+                    });
+                }
+                if (totalIncidentPages > 0) { paginationInfo.textContent = `Trang ${pagination.page} / ${totalIncidentPages} (Tổng: ${pagination.total_items})`; prevPageButton.disabled = pagination.page <= 1; nextPageButton.disabled = pagination.page >= totalIncidentPages; paginationControls.classList.remove('hidden'); }
+                else { paginationControls.classList.add('hidden'); }
+            } catch (error) { console.error('Lỗi trong quá trình fetch và xử lý sự cố:', error); incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-red-500">Đã xảy ra lỗi khi tải dữ liệu sự cố: ${error.message}. Vui lòng thử lại hoặc kiểm tra console.</td></tr>`; paginationControls.classList.add('hidden');
+            } finally { hideLoading(); }
+        }
+
+        // Namespace Management Functions
+        async function fetchAvailableNamespaces() { /* ... no changes ... */
+            try {
+                const response = await fetch('/api/namespaces');
+                if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
+                const data = await response.json();
+                if (data.error) { throw new Error(`API Error: ${data.error}`); }
+                return data;
+            } catch (error) {
+                console.error('Lỗi khi lấy danh sách namespace có sẵn:', error);
+                namespaceListDiv.innerHTML = `<p class="text-red-500 col-span-full text-center">Lỗi tải danh sách namespace.</p>`;
+                return null;
+            }
+        }
+        async function fetchMonitoredNamespaces() { /* ... no changes ... */
+             try {
+                const response = await fetch('/api/config/monitored_namespaces');
+                if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
+                 const data = await response.json();
+                 if (data.error) { throw new Error(`API Error: ${data.error}`); }
+                return data;
+            } catch (error) {
+                console.error('Lỗi khi lấy danh sách namespace đang giám sát:', error);
+                namespaceListDiv.innerHTML = `<p class="text-red-500 col-span-full text-center">Lỗi tải cấu hình namespace.</p>`;
+                return null;
+            }
+        }
+        async function renderNamespaceList() { /* ... no changes ... */
+            showLoading();
+            namespaceListDiv.innerHTML = '';
+            namespaceLoadingText.classList.remove('hidden');
+            try {
+                const [availableNamespaces, monitoredNamespaces] = await Promise.all([
+                    fetchAvailableNamespaces(),
+                    fetchMonitoredNamespaces()
+                ]);
+                if (availableNamespaces === null || monitoredNamespaces === null) {
+                    hideLoading();
+                    namespaceLoadingText.classList.add('hidden');
+                    return;
+                }
+                namespaceLoadingText.classList.add('hidden');
+                if (availableNamespaces.length === 0) {
+                    namespaceListDiv.innerHTML = `<p class="text-gray-500 dark:text-gray-400 col-span-full text-center">Không tìm thấy namespace nào.</p>`;
+                } else {
+                    availableNamespaces.forEach(ns => {
+                        const isChecked = monitoredNamespaces.includes(ns);
+                        const div = document.createElement('div');
+                        div.className = 'namespace-item text-sm';
+                        const checkbox = document.createElement('input');
+                        checkbox.type = 'checkbox';
+                        checkbox.id = `ns-${ns}`;
+                        checkbox.value = ns;
+                        checkbox.checked = isChecked;
+                        checkbox.className = 'form-checkbox h-4 w-4 text-indigo-600 transition duration-150 ease-in-out rounded dark:bg-gray-700 dark:border-gray-600';
+                        const label = document.createElement('label');
+                        label.htmlFor = `ns-${ns}`;
+                        label.textContent = ns;
+                        label.className = 'ml-2 text-gray-700 dark:text-gray-300 cursor-pointer';
+                        div.appendChild(checkbox);
+                        div.appendChild(label);
+                        namespaceListDiv.appendChild(div);
+                    });
+                }
+            } catch (error) {
+                console.error("Error rendering namespace list:", error);
+                namespaceListDiv.innerHTML = `<p class="text-red-500 col-span-full text-center">Lỗi hiển thị danh sách namespace.</p>`;
+                namespaceLoadingText.classList.add('hidden');
+            } finally {
+                hideLoading();
+            }
+        }
+        async function saveMonitoredNamespaces() { /* ... no changes ... */
+            showLoading();
+            saveConfigButton.disabled = true;
+            saveConfigStatus.textContent = 'Đang lưu...';
+            saveConfigStatus.className = 'text-sm text-blue-600 dark:text-blue-400 mr-4';
+            saveConfigStatus.classList.remove('hidden');
+            const selectedNamespaces = [];
+            namespaceListDiv.querySelectorAll('input[type="checkbox"]:checked').forEach(checkbox => {
+                selectedNamespaces.push(checkbox.value);
+            });
+            try {
+                const response = await fetch('/api/config/monitored_namespaces', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', },
+                    body: JSON.stringify({ namespaces: selectedNamespaces }),
+                });
+                const result = await response.json();
+                if (!response.ok || result.error) { throw new Error(result.error || `HTTP error! status: ${response.status}`); }
+                saveConfigStatus.textContent = 'Đã lưu thành công!';
+                saveConfigStatus.className = 'text-sm text-green-600 dark:text-green-400 mr-4';
+                console.log("Namespace config saved:", selectedNamespaces);
+            } catch (error) {
+                console.error('Lỗi khi lưu cấu hình namespace:', error);
+                saveConfigStatus.textContent = `Lỗi: ${error.message}`;
+                saveConfigStatus.className = 'text-sm text-red-600 dark:text-red-400 mr-4';
+            } finally {
+                hideLoading();
+                saveConfigButton.disabled = false;
+                setTimeout(() => { saveConfigStatus.classList.add('hidden'); }, 3000);
+            }
+        }
+
+        // v1.0.6: Modal Functions
+        function openModal(incidentId) {
+            const incidentData = incidentsDataCache[incidentId];
+            if (!incidentData) {
+                console.error(`Incident data not found in cache for ID: ${incidentId}`);
+                return;
+            }
+
+            // Populate modal fields
+            setText(modalTimestamp, formatVietnameseDateTime(incidentData.timestamp));
+            setText(modalPodKey, incidentData.pod_key);
+            setText(modalSeverity, incidentData.severity);
+            setText(modalInitialReasons, incidentData.initial_reasons);
+            setText(modalSummary, incidentData.summary);
+            setText(modalRootCause, incidentData.root_cause);
+            setText(modalTroubleshootingSteps, incidentData.troubleshooting_steps);
+            setText(modalSampleLogs, incidentData.sample_logs);
+            setText(modalK8sContext, incidentData.k8s_context);
+            setText(modalInputPrompt, incidentData.input_prompt);
+            setText(modalRawAiResponse, incidentData.raw_ai_response);
+
+            // Show modal
+            incidentModal.classList.remove('modal-hidden');
+            incidentModal.classList.add('modal-visible');
+            document.body.style.overflow = 'hidden'; // Prevent background scrolling
+        }
+
+        function closeModal() {
+            incidentModal.classList.add('modal-hidden');
+            incidentModal.classList.remove('modal-visible');
+            document.body.style.overflow = ''; // Restore background scrolling
+        }
+
+
+        // === Theme Toggle Logic (Light/Dark Only) ===
+        function updateThemeIcon() {
+            const isDarkMode = localStorage.theme === 'dark';
+            if (isDarkMode) {
+                themeToggleLightIcon.classList.remove('hidden');
+                themeToggleDarkIcon.classList.add('hidden');
+            } else {
+                themeToggleLightIcon.classList.add('hidden');
+                themeToggleDarkIcon.classList.remove('hidden');
+            }
+        }
         function applyTheme(theme) {
             if (theme === 'dark') {
                 document.documentElement.classList.add('dark');
                 localStorage.setItem('theme', 'dark');
-            } else { // Default to light
+            } else {
                 document.documentElement.classList.remove('dark');
-                localStorage.setItem('theme', 'light'); // Explicitly set light
+                localStorage.setItem('theme', 'light');
             }
-            updateThemeIcon(); // Update the button icon after applying theme
-            // Re-render charts on theme change if they exist
-            // Check if chart instances exist before calling fetchStats
-            if(lineChartInstance || topPodsChartInstance || namespacePieInstance || severityPieInstance) {
-                 fetchStats(currentStatsDays); // Refetch stats which re-renders charts
+            updateThemeIcon();
+             if(lineChartInstance || topPodsChartInstance || namespacePieInstance || severityPieInstance) {
+                 fetchStats(currentStatsDays);
             }
         }
-
-        // *** FIX: Simplified theme toggle button listener ***
         themeToggleButton.addEventListener('click', () => {
-            // Read the current theme directly from localStorage or default to light
             const currentTheme = localStorage.getItem('theme') || 'light';
-            const nextTheme = currentTheme === 'dark' ? 'light' : 'dark'; // Toggle between light and dark
+            const nextTheme = currentTheme === 'dark' ? 'light' : 'dark';
             applyTheme(nextTheme);
         });
-
-        // *** FIX: Removed system theme listener ***
-        // window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => { ... });
 
 
         // === Event Listeners ===
         document.addEventListener('DOMContentLoaded', () => {
-            setTodayDate(); // Set today's date in the header
+            setTodayDate();
+            const initialTheme = localStorage.getItem('theme') || 'light';
+            applyTheme(initialTheme);
 
-            // *** FIX: Apply initial theme based only on localStorage (defaulting to light) ***
-            const initialTheme = localStorage.getItem('theme') || 'light'; // Default to light
-            applyTheme(initialTheme); // Apply theme on load
-
-            // Initial data fetch for 'Today'
             const today = new Date();
             const startUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0, 0)).toISOString();
             const endUTC = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 23, 59, 59, 999)).toISOString();
-            fetchStats(1); // Fetch stats for today
-            fetchIncidents(1, '', '', startUTC, endUTC); // Fetch incidents for today
-
-            // Fetch and render namespaces on load
+            fetchStats(1);
+            fetchIncidents(1, '', '', startUTC, endUTC);
             renderNamespaceList();
+
+            // v1.0.6: Add modal close listeners
+            modalCloseButton.addEventListener('click', closeModal);
+            modalOverlay.addEventListener('click', (event) => {
+                // Close only if clicking directly on the overlay, not the content inside
+                if (event.target === modalOverlay) {
+                    closeModal();
+                }
+            });
+            // Close modal on Escape key press
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && incidentModal.classList.contains('modal-visible')) {
+                    closeModal();
+                }
+            });
         });
 
-        // ... (keep other event listeners: refreshButton, filterButton, podFilterInput, prevPageButton, nextPageButton, timeRangeButtons, saveConfigButton) ...
         refreshButton.addEventListener('click', () => {
-             // Reset filters and fetch data for the current view
              podFilterInput.value = '';
              severityFilterSelect.value = '';
-             fetchStats(currentStatsDays); // Refetch stats for the current time range
-             fetchIncidents(1, '', '', currentIncidentStartDate, currentIncidentEndDate); // Refetch incidents for the current time range
-             renderNamespaceList(); // Also refresh namespace list
+             fetchStats(currentStatsDays);
+             fetchIncidents(1, '', '', currentIncidentStartDate, currentIncidentEndDate);
+             renderNamespaceList();
         });
 
-        // Filter Button
         filterButton.addEventListener('click', () => {
-             // Fetch incidents using current filters and date range, reset to page 1
              fetchIncidents(1, podFilterInput.value, severityFilterSelect.value, currentIncidentStartDate, currentIncidentEndDate);
         });
-        // Allow Enter key in filter input
         podFilterInput.addEventListener('keypress', function (e) {
              if (e.key === 'Enter') { filterButton.click(); }
         });
 
-        // Pagination Buttons
         prevPageButton.addEventListener('click', () => {
             if (currentIncidentPage > 1) { fetchIncidents(currentIncidentPage - 1, currentPodFilter, currentSeverityFilter, currentIncidentStartDate, currentIncidentEndDate); }
         });
@@ -309,35 +732,24 @@
              if (currentIncidentPage < totalIncidentPages) { fetchIncidents(currentIncidentPage + 1, currentPodFilter, currentSeverityFilter, currentIncidentStartDate, currentIncidentEndDate); }
         });
 
-        // Time Range Buttons
         timeRangeButtons.forEach(button => {
             button.addEventListener('click', () => {
                 const days = parseInt(button.getAttribute('data-days'));
-                currentStatsDays = days; // Update state
-
-                // Calculate date range based on selected days
+                currentStatsDays = days;
                 const endDate = new Date();
                 const startDate = new Date();
-                startDate.setDate(endDate.getDate() - days + 1); // Set start date correctly
-                // Get UTC start/end for filtering incidents
+                startDate.setDate(endDate.getDate() - days + 1);
                 const startUTC = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate(), 0, 0, 0, 0)).toISOString();
                 const endUTC = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate(), 23, 59, 59, 999)).toISOString();
-
-                // Update state for date range
                 currentIncidentStartDate = startUTC;
                 currentIncidentEndDate = endUTC;
-
-                // Fetch data for the new range
                 fetchStats(days);
-                fetchIncidents(1, '', '', startUTC, endUTC); // Fetch incidents for the new range, reset filter/page
-
-                // Update button styles
+                fetchIncidents(1, '', '', startUTC, endUTC);
                 timeRangeButtons.forEach(btn => { btn.classList.remove('bg-blue-500', 'text-white'); btn.classList.add('bg-gray-300', 'dark:bg-gray-600', 'text-gray-700', 'dark:text-gray-200'); });
                 button.classList.add('bg-blue-500', 'text-white'); button.classList.remove('bg-gray-300', 'dark:bg-gray-600', 'text-gray-700', 'dark:text-gray-200');
             });
         });
 
-        // Save Namespace Config button
         saveConfigButton.addEventListener('click', saveMonitoredNamespaces);
 
     </script>
