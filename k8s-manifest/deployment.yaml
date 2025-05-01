@@ -1,80 +1,46 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: obs-engine
+  name: k8s-log-agent
   namespace: kube-observability
-  labels:
-    app: obs-engine
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: obs-engine
+      app: k8s-log-agent
   template:
     metadata:
       labels:
-        app: obs-engine
+        app: k8s-log-agent
     spec:
-      volumes:
-        - name: obsengine-data
-          persistentVolumeClaim:
-            claimName: obs-engine-data-pvc
-
       containers:
-        - name: obsengine-server
-          image: codebuild.alfinac.com:4444/library/obsengine:v1.0.7 # Updated image
-          imagePullPolicy: Always
-          ports:
-            - containerPort: 8080
+        - name: agent
+          image: codebuild.alfinac.com:4444/library/ai-agent1:v1.0.7
           envFrom:
             - configMapRef:
-                name: obs-engine-config
-            - secretRef:
-                name: obs-engine-secret
+                name: k8s-log-agent-config
           env:
             - name: TZ
               value: Asia/Ho_Chi_Minh
-            - name: DB_PATH
-              value: "/data/obsengine_data.db"
-            - name: LOG_LEVEL
-              value: "INFO"
-            - name: FLASK_DEBUG
-              value: "false"
-          volumeMounts:
-            - name: obsengine-data
-              mountPath: /data
+            - name: K8S_CLUSTER_NAME
+              value: "alfinac-k8s-cluster-1"
           resources:
             limits:
-              cpu: "1"
-              memory: "1Gi"
+              cpu: 500m
+              memory: 512Mi
             requests:
-              cpu: "200m"
-              memory: "512Mi"
-          # Added health checks back
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
-            initialDelaySeconds: 15
-            periodSeconds: 20
-            timeoutSeconds: 5
-            failureThreshold: 3
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
-            initialDelaySeconds: 30
-            periodSeconds: 30
-            timeoutSeconds: 5
-            failureThreshold: 5
-
+              cpu: 100m
+              memory: 128Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: Always
       restartPolicy: Always
       terminationGracePeriodSeconds: 30
       dnsPolicy: ClusterFirst
+      serviceAccountName: k8s-log-agent-sa
       securityContext:
-        runAsUser: 1002
+        runAsUser: 1001
         runAsNonRoot: true
-        fsGroup: 1002
       schedulerName: default-scheduler
   strategy:
     type: RollingUpdate

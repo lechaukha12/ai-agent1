@@ -51,6 +51,11 @@ def refresh_namespaces_if_needed(last_refresh_time):
 def identify_pods_to_investigate(monitored_namespaces, start_cycle_time, config):
     restart_threshold = config.get('restart_count_threshold', 5)
     loki_scan_min_level = config.get('loki_scan_min_level', 'INFO')
+    loki_url = config.get('loki_url')
+
+    if not loki_url:
+        logging.error("LOKI_URL is not configured. Cannot scan Loki.")
+        return {}
 
     k8s_problem_pods = k8s_monitor.scan_kubernetes_for_issues(
         monitored_namespaces,
@@ -61,7 +66,7 @@ def identify_pods_to_investigate(monitored_namespaces, start_cycle_time, config)
     loki_scan_end_time = start_cycle_time
     loki_scan_start_time = loki_scan_end_time - timedelta(minutes=LOKI_SCAN_RANGE_MINUTES)
     loki_suspicious_logs = loki_client.scan_loki_for_suspicious_logs(
-        config.get('loki_url'),
+        loki_url,
         loki_scan_start_time,
         loki_scan_end_time,
         monitored_namespaces,
@@ -90,10 +95,17 @@ def identify_pods_to_investigate(monitored_namespaces, start_cycle_time, config)
 
 def collect_pod_details(namespace, pod_name, initial_reasons, suspicious_logs_found_in_scan, config):
     logging.info(f"Collecting details for pod: {namespace}/{pod_name} (Initial Reasons: {initial_reasons})")
+    loki_url = config.get('loki_url')
+    loki_detail_minutes = config.get('loki_detail_log_range_minutes', 30)
+    loki_limit = config.get('loki_query_limit', 500)
+
+    if not loki_url:
+        logging.error(f"LOKI_URL not configured. Cannot fetch detailed logs for {namespace}/{pod_name}.")
+        return [], ""
 
     pod_info = k8s_monitor.get_pod_info(namespace, pod_name)
     node_info = k8s_monitor.get_node_info(pod_info.get('node_name')) if pod_info else None
-    pod_events = k8s_monitor.get_pod_events(namespace, pod_name, since_minutes=config.get('loki_detail_log_range_minutes', 30) + 5)
+    pod_events = k8s_monitor.get_pod_events(namespace, pod_name, since_minutes=loki_detail_minutes + 5)
     k8s_context_str = k8s_monitor.format_k8s_context(pod_info, node_info, pod_events)
 
     logs_for_analysis = suspicious_logs_found_in_scan
@@ -101,14 +113,14 @@ def collect_pod_details(namespace, pod_name, initial_reasons, suspicious_logs_fo
     if not logs_for_analysis:
         logging.info(f"No logs found in initial scan for {namespace}/{pod_name}. Querying Loki for detailed logs...")
         log_end_time = datetime.now(timezone.utc)
-        log_start_time = log_end_time - timedelta(minutes=config.get('loki_detail_log_range_minutes', 30))
+        log_start_time = log_end_time - timedelta(minutes=loki_detail_minutes)
         detailed_logs = loki_client.query_loki_for_pod(
-            config.get('loki_url'),
+            loki_url,
             namespace,
             pod_name,
             log_start_time,
             log_end_time,
-            config.get('loki_query_limit', 500)
+            loki_limit
         )
         logs_for_analysis = detailed_logs
     else:
@@ -149,30 +161,33 @@ def collect_pod_details(namespace, pod_name, initial_reasons, suspicious_logs_fo
 
     return serializable_logs, k8s_context_str
 
-def send_data_to_obs_engine(obs_engine_url, pod_key, initial_reasons, k8s_context, logs):
+def send_data_to_obs_engine(obs_engine_url, cluster_name, pod_key, initial_reasons, k8s_context, logs):
     if not obs_engine_url:
         logging.error(f"ObsEngine URL not configured. Cannot send data for {pod_key}.")
         return False
 
     payload = {
+        "cluster_name": cluster_name,
+        "agent_id": cluster_name,
         "pod_key": pod_key,
         "collection_timestamp": datetime.now(timezone.utc).isoformat(),
         "initial_reasons": initial_reasons,
         "k8s_context": k8s_context,
         "logs": logs
     }
+    logging.debug(f"Sending payload to ObsEngine: {json.dumps(payload, indent=2)}")
 
     try:
         headers = {'Content-Type': 'application/json'}
         response = requests.post(obs_engine_url, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
-        logging.info(f"Successfully sent data for {pod_key} to ObsEngine. Status: {response.status_code}")
+        logging.info(f"Successfully sent data for {pod_key} from cluster {cluster_name} to ObsEngine. Status: {response.status_code}")
         return True
     except requests.exceptions.Timeout:
-        logging.error(f"Timeout sending data for {pod_key} to {obs_engine_url}.")
+        logging.error(f"Timeout sending data for {pod_key} from cluster {cluster_name} to {obs_engine_url}.")
         return False
     except requests.exceptions.RequestException as e:
-        logging.error(f"Error sending data for {pod_key} to ObsEngine: {e}")
+        logging.error(f"Error sending data for {pod_key} from cluster {cluster_name} to ObsEngine: {e}")
         if e.response is not None:
             try:
                 logging.error(f"ObsEngine Response Status: {e.response.status_code}")
@@ -182,7 +197,7 @@ def send_data_to_obs_engine(obs_engine_url, pod_key, initial_reasons, k8s_contex
                 logging.error(f"Could not log ObsEngine response details: {log_err}")
         return False
     except Exception as e:
-        logging.error(f"Unexpected error sending data for {pod_key}: {e}", exc_info=True)
+        logging.error(f"Unexpected error sending data for {pod_key} from cluster {cluster_name}: {e}", exc_info=True)
         return False
 
 def perform_monitoring_cycle(last_namespace_refresh_time):
@@ -193,6 +208,7 @@ def perform_monitoring_cycle(last_namespace_refresh_time):
     config = config_manager.get_config()
     current_scan_interval = config.get('scan_interval_seconds', 30)
     obs_engine_url = config.get('obs_engine_url')
+    cluster_name = config.get('cluster_name')
 
     if not obs_engine_url:
         logging.error("OBS_ENGINE_URL is not configured. Agent cannot forward data.")
@@ -201,6 +217,10 @@ def perform_monitoring_cycle(last_namespace_refresh_time):
         logging.info(f"--- Cycle finished early (ObsEngine URL missing) in {cycle_duration:.2f}s. Sleeping for {sleep_time:.2f}s ---")
         time.sleep(sleep_time)
         return last_namespace_refresh_time
+
+    if not cluster_name or cluster_name == config_manager.DEFAULT_K8S_CLUSTER_NAME:
+        logging.warning(f"K8S_CLUSTER_NAME is not set or using default '{config_manager.DEFAULT_K8S_CLUSTER_NAME}'. Data sent might be harder to distinguish.")
+
 
     last_namespace_refresh_time = refresh_namespaces_if_needed(last_namespace_refresh_time)
     monitored_namespaces = config_manager.get_monitored_namespaces()
@@ -213,6 +233,7 @@ def perform_monitoring_cycle(last_namespace_refresh_time):
         time.sleep(sleep_time)
         return last_namespace_refresh_time
 
+    logging.info(f"Agent ID/Cluster Name: {cluster_name}")
     logging.info(f"Currently monitoring {len(monitored_namespaces)} namespaces: {', '.join(monitored_namespaces)}")
     pods_to_investigate = identify_pods_to_investigate(monitored_namespaces, start_cycle_time_dt, config)
 
@@ -229,6 +250,7 @@ def perform_monitoring_cycle(last_namespace_refresh_time):
             )
             send_data_to_obs_engine(
                 obs_engine_url,
+                cluster_name,
                 pod_key,
                 initial_reasons,
                 k8s_context_str,
@@ -274,6 +296,7 @@ if __name__ == "__main__":
     logging.info("Initial agent configuration loaded.")
     logging.info(f"Loki URL: {initial_config.get('loki_url', 'Not Set')}")
     logging.info(f"ObsEngine URL: {initial_config.get('obs_engine_url', 'Not Set')}")
+    logging.info(f"Cluster Name: {initial_config.get('cluster_name', 'Not Set')}")
     logging.info(f"Scan Interval: {initial_config.get('scan_interval_seconds', 'Default')}s")
     logging.info(f"Monitored Namespaces: {initial_config.get('monitored_namespaces', 'Default')}")
 
