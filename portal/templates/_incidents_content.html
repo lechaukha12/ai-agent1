@@ -1,0 +1,46 @@
+<section id="incidents-content" class="content-section hidden">
+    <header class="mb-6">
+       <h2 class="text-2xl font-semibold text-gray-800 dark:text-gray-100">Incidents</h2>
+       <p class="text-sm text-gray-500 dark:text-gray-400">Danh sách các sự cố được phát hiện.</p>
+   </header>
+   <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 p-4 md:p-6">
+       <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-5 gap-4">
+           <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-200 flex-shrink-0">Danh sách Sự cố</h3>
+           <div class="flex flex-wrap items-center gap-2 md:gap-3 w-full md:w-auto">
+               <input type="text" id="pod-filter" placeholder="Lọc Pod/Namespace..." class="form-input px-3 py-1.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-sm flex-grow md:flex-grow-0"> <select id="severity-filter" class="form-select px-3 py-1.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-sm appearance-none pr-8"> <option value="">Tất cả Mức độ</option>
+                   <option value="INFO">INFO</option>
+                   <option value="WARNING">WARNING</option>
+                   <option value="ERROR">ERROR</option>
+                   <option value="CRITICAL">CRITICAL</option>
+               </select>
+               <button id="filter-button" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-1.5 px-4 rounded-lg shadow text-sm transition duration-200 ease-in-out">Lọc</button>
+               <button id="refresh-incidents-button" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-1.5 px-4 rounded-lg shadow text-sm transition duration-200 ease-in-out">
+                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 inline-block mr-1"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
+                   Làm mới
+               </button>
+           </div>
+       </div>
+       <div class="overflow-x-auto">
+           <table id="incidents-table" class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+               <thead class="bg-gray-50 dark:bg-gray-700">
+                   <tr>
+                       <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Thời gian</th>
+                       <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Pod</th>
+                       <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Mức độ</th>
+                       <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Tóm tắt</th>
+                       <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Lý do phát hiện</th>
+                   </tr>
+               </thead>
+               <tbody id="incidents-table-body" class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                   <tr><td colspan="5" class="text-center py-6 text-gray-500 dark:text-gray-400">Đang tải dữ liệu...</td></tr>
+               </tbody>
+           </table>
+       </div>
+       <div id="pagination-controls" class="mt-4 flex justify-between items-center text-sm text-gray-600 dark:text-gray-400">
+           <span id="pagination-info"></span>
+           <div class="flex space-x-2">
+               <button id="prev-page" class="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-md text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed">&lt; Trước</button> <button id="next-page" class="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-md text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed">Sau &gt;</button>
+           </div>
+       </div>
+   </div>
+</section>

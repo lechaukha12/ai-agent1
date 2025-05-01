@@ -4,29 +4,33 @@ metadata:
   name: k8s-log-agent-config
   namespace: kube-observability # Đảm bảo namespace này đúng với môi trường của bạn
 data:
-  # --- Loki Configuration ---
-  LOKI_URL: "http://loki-loki-distributed-query-frontend.loki.svc.cluster.local:3100" # !!! THAY THẾ BẰNG URL LOKI CỦA BẠN !!!
-  LOKI_SCAN_RANGE_MINUTES: "1" # Khoảng thời gian quét log nhanh (phút)
-  LOKI_DETAIL_LOG_RANGE_MINUTES: "30" # Khoảng thời gian lấy log chi tiết khi điều tra (phút)
-  LOKI_QUERY_LIMIT: "500" # Giới hạn số dòng log khi query chi tiết
-  LOKI_SCAN_MIN_LEVEL: "INFO" # Mức log tối thiểu để quét Loki ban đầu (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+  # --- Core Agent & Connection Settings ---
+  LOKI_URL: "http://loki-loki-distributed-query-frontend:3100" # !!! THAY THẾ BẰNG URL LOKI CỦA BẠN !!!
+  DB_PATH: "/data/agent_stats.db" # Đường dẫn tới file SQLite trên PVC
+  LOCAL_GEMINI_ENDPOINT: ""     # Endpoint cho provider 'local' (nếu dùng)
 
-  # --- Agent Behavior ---
-  SCAN_INTERVAL_SECONDS: "30" # Tần suất quét (giây)
-  STATS_UPDATE_INTERVAL_SECONDS: "300" # Tần suất cập nhật DB thống kê (giây)
-  NAMESPACE_REFRESH_INTERVAL_SECONDS: "3600" # Tần suất làm mới danh sách namespace từ K8s (giây, 1 giờ)
+  # --- Agent Behavior Intervals (Seconds) ---
+  STATS_UPDATE_INTERVAL_SECONDS: "300"  # Tần suất cập nhật DB thống kê
+  NAMESPACE_REFRESH_INTERVAL_SECONDS: "3600" # Tần suất làm mới danh sách namespace từ K8s (1 giờ)
+  CONFIG_REFRESH_INTERVAL_SECONDS: "60"   # Tần suất đọc lại cấu hình từ DB
 
-  # --- Kubernetes Monitoring ---
-  EXCLUDED_NAMESPACES: "kube-node-lease,kube-public" # Các namespace loại trừ khỏi quét
+  # --- Loki Query Parameters (Defaults/Fallbacks) ---
+  # Các giá trị này có thể được ghi đè bởi cài đặt trong Portal nếu được triển khai
+  LOKI_SCAN_RANGE_MINUTES: "1"
+  LOKI_DETAIL_LOG_RANGE_MINUTES: "30"
+  LOKI_QUERY_LIMIT: "500"
+
+  # --- Kubernetes Monitoring Settings (Defaults/Fallbacks) ---
+  EXCLUDED_NAMESPACES: "kube-node-lease,kube-public" # Namespace luôn loại trừ
   DEFAULT_MONITORED_NAMESPACES: "kube-system,default" # Namespace mặc định nếu không có cấu hình trong DB
-  RESTART_COUNT_THRESHOLD: "5" # Ngưỡng restart container để coi là sự cố
 
-  # --- AI Analysis Configuration ---
-  GEMINI_MODEL_NAME: "gemini-1.5-flash" # Tên model Gemini
-  USE_LOCAL_MODEL: "false" # Đặt thành "true" nếu muốn dùng model local thay vì Gemini API
-  LOCAL_GEMINI_ENDPOINT: "" # URL của endpoint model local (chỉ cần nếu USE_LOCAL_MODEL=true)
+  # --- Default AI Settings (Used ONLY if DB config is unavailable/invalid) ---
+  # Các cài đặt chính cho AI (enable, provider, model, key) được quản lý qua Portal
+  ENABLE_AI_ANALYSIS: "true"    # Giá trị mặc định nếu không đọc được từ DB
+  AI_PROVIDER: "gemini"         # Giá trị mặc định nếu không đọc được từ DB
+  AI_MODEL_IDENTIFIER: "gemini-1.5-flash" # Giá trị mặc định nếu không đọc được từ DB
 
-  # v1.0.6: Updated Prompt Template
+  # --- Templates (Should remain here) ---
   PROMPT_TEMPLATE: |
     Phân tích tình huống của pod Kubernetes '{namespace}/{pod_name}'.
     **Ưu tiên xem xét ngữ cảnh Kubernetes** được cung cấp dưới đây vì nó có thể là lý do chính bạn được gọi.
@@ -57,11 +61,6 @@ data:
       "troubleshooting_steps": "- Tăng memory limit cho pod.\n- Phân tích memory profile của ứng dụng.\n- Kiểm tra lại logic cấp phát/giải phóng bộ nhớ trong code."
     }}
 
-  # --- Alerting Configuration ---
-  ALERT_SEVERITY_LEVELS: "INFO,WARNING,ERROR,CRITICAL" # Các mức độ sẽ gửi cảnh báo Telegram
-
-  # v1.0.6: Added configurable Telegram Alert Template
-  # Các placeholder có sẵn: {pod_key}, {severity}, {summary}, {root_cause}, {troubleshooting_steps}, {initial_reasons}, {alert_time}, {sample_logs}
   TELEGRAM_ALERT_TEMPLATE: |
     🚨 *Cảnh báo K8s/Log (Pod: {pod_key})* 🚨
     *Mức độ:* `{severity}`
@@ -77,6 +76,9 @@ data:
 
     _Vui lòng kiểm tra chi tiết trên dashboard hoặc Loki/Kubernetes._
 
-  # --- Database Path ---
-  DB_PATH: "/data/agent_stats.db" # Đường dẫn tới file SQLite trên PVC
-
+  # --- Các tham số đã chuyển sang Portal/DB (không cần ở đây nữa) ---
+  # LOKI_SCAN_MIN_LEVEL: "INFO"
+  # SCAN_INTERVAL_SECONDS: "30"
+  # RESTART_COUNT_THRESHOLD: "5"
+  # ALERT_SEVERITY_LEVELS: "INFO,WARNING,ERROR,CRITICAL"
+  # ALERT_COOLDOWN_MINUTES: "30"
