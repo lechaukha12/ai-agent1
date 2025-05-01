@@ -112,6 +112,7 @@ def init_db():
             cursor = conn.cursor()
             logging.info("Ensuring database tables exist for Portal...")
 
+            # Create tables if they don't exist (no changes needed here)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS incidents (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, pod_key TEXT NOT NULL, severity TEXT NOT NULL,
@@ -141,11 +142,11 @@ def init_db():
             ''')
             logging.info("Portal tables ensured.")
 
+            # Create default user if not exists
             username_to_create = 'khalc'
             password_to_create = 'chaukha'
             cursor.execute("SELECT COUNT(*) FROM users WHERE username = ?", (username_to_create,))
             user_exists = cursor.fetchone()[0]
-
             if user_exists == 0:
                 logging.info(f"User '{username_to_create}' not found, attempting to create...")
                 try:
@@ -171,14 +172,15 @@ def init_db():
                 'restart_count_threshold': '5',
                 'alert_severity_levels': 'WARNING,ERROR,CRITICAL',
                 'alert_cooldown_minutes': '30',
-                # Add Telegram defaults (empty)
+                # --- ADDED TELEGRAM TOGGLE DEFAULT ---
+                'enable_telegram_alerts': 'false', # Default to disabled
+                # --------------------------------------
                 'telegram_bot_token': '',
                 'telegram_chat_id': ''
             }
             for key, value in default_agent_configs.items():
                 cursor.execute("INSERT OR IGNORE INTO agent_config (key, value) VALUES (?, ?)", (key, value))
             logging.info("Default agent config values ensured in DB.")
-
 
         logging.info(f"Database initialization/check complete at {DB_PATH}")
         return True
@@ -191,19 +193,18 @@ def init_db():
     finally:
         if conn: conn.close()
 
-
-# Gọi init_db khi ứng dụng khởi động
+# Call init_db on startup
 if not init_db():
     logging.critical("DATABASE INITIALIZATION FAILED! Portal might not work correctly.")
 
-
-# --- Route Chính ---
+# --- Routes ---
 @app.route('/')
 @login_required
 def index():
     return render_template('index.html', db_path=DB_PATH, app_title="Bug Tracker")
 
-# --- Route Đăng nhập / Đăng xuất ---
+# --- Login/Logout Routes ---
+# ... (Login/Logout routes remain unchanged) ...
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated: return redirect(url_for('index'))
@@ -232,8 +233,10 @@ def login():
 def logout():
     logout_user(); flash('Bạn đã đăng xuất.', 'info'); return redirect(url_for('login'))
 
+# --- API Routes ---
 
 # --- API Lấy Danh sách Sự cố ---
+# ... (get_incidents route remains unchanged) ...
 @app.route('/api/incidents')
 @login_required
 def get_incidents():
@@ -276,8 +279,8 @@ def get_incidents():
         if conn: conn.close()
         return jsonify({"error": "Unexpected error fetching incidents."}), 500
 
-
 # --- API Lấy Thống kê ---
+# ... (get_stats route remains unchanged) ...
 @app.route('/api/stats')
 @login_required
 def get_stats():
@@ -319,6 +322,7 @@ def get_stats():
         return jsonify({"error": "Unexpected error fetching stats."}), 500
 
 # --- API Namespace ---
+# ... (get_available_namespaces route remains unchanged) ...
 @app.route('/api/namespaces')
 @login_required
 def get_available_namespaces():
@@ -337,6 +341,8 @@ def get_available_namespaces():
         if conn: conn.close()
         return jsonify({"error": "Unexpected error fetching namespaces."}), 500
 
+# --- API Monitored Namespaces Config ---
+# ... (manage_monitored_namespaces route remains unchanged) ...
 @app.route('/api/config/monitored_namespaces', methods=['GET', 'POST'])
 @login_required
 def manage_monitored_namespaces():
@@ -381,7 +387,8 @@ def manage_monitored_namespaces():
             logging.error(f"Unexpected error saving monitored_namespaces: {e}", exc_info=True)
             return jsonify({"error": "Unexpected error saving config."}), 500
 
-# --- API Endpoint for AI Configuration ---
+# --- API AI Config ---
+# ... (manage_ai_config route remains unchanged) ...
 @app.route('/api/config/ai', methods=['GET', 'POST'])
 @login_required
 def manage_ai_config():
@@ -449,7 +456,8 @@ def manage_ai_config():
             logging.error(f"Unexpected error saving AI config: {e}", exc_info=True)
             return jsonify({"error": "Unexpected error saving AI config."}), 500
 
-# --- API Endpoint for General Agent Settings ---
+# --- API General Config ---
+# ... (manage_general_config route remains unchanged) ...
 @app.route('/api/config/general', methods=['GET', 'POST'])
 @login_required
 def manage_general_config():
@@ -537,7 +545,7 @@ def manage_general_config():
             logging.error(f"Unexpected error saving general config: {e}", exc_info=True)
             return jsonify({"error": "Unexpected error saving general config."}), 500
 
-# *** NEW API Endpoint for Telegram Configuration ***
+# --- UPDATED API Telegram Config ---
 @app.route('/api/config/telegram', methods=['GET', 'POST'])
 @login_required
 def manage_telegram_config():
@@ -547,7 +555,8 @@ def manage_telegram_config():
     if request.method == 'GET':
         try:
             cursor = conn.cursor()
-            keys_to_fetch = ('telegram_bot_token', 'telegram_chat_id')
+            # Fetch token, chat_id, and the new toggle status
+            keys_to_fetch = ('telegram_bot_token', 'telegram_chat_id', 'enable_telegram_alerts')
             placeholders = ','.join('?' * len(keys_to_fetch))
             cursor.execute(f"SELECT key, value FROM agent_config WHERE key IN ({placeholders})", keys_to_fetch)
             results = cursor.fetchall()
@@ -557,10 +566,14 @@ def manage_telegram_config():
 
             # Check if token exists without revealing it
             has_token = bool(telegram_config.get('telegram_bot_token'))
+            # Get toggle status, default to false if missing
+            enable_alerts_str = telegram_config.get('enable_telegram_alerts', 'false').lower()
+            enable_alerts = enable_alerts_str == 'true'
 
             return jsonify({
                 "telegram_chat_id": telegram_config.get('telegram_chat_id', ''),
-                "has_token": has_token
+                "has_token": has_token,
+                "enable_telegram_alerts": enable_alerts # Return boolean
             })
 
         except sqlite3.Error as e:
@@ -578,16 +591,22 @@ def manage_telegram_config():
 
         token = data.get('telegram_bot_token') # Can be empty if not updating
         chat_id = data.get('telegram_chat_id', '').strip()
+        enable_alerts = data.get('enable_telegram_alerts') # Expect boolean from frontend
 
         if not chat_id:
              return jsonify({"error": "Telegram Chat ID cannot be empty"}), 400
+        if not isinstance(enable_alerts, bool):
+            return jsonify({"error": "'enable_telegram_alerts' must be a boolean"}), 400
 
         try:
             with sqlite3.connect(DB_PATH, timeout=10) as conn_save:
                 cursor = conn_save.cursor()
-                # Always update Chat ID
+                # Update Chat ID
                 cursor.execute("INSERT OR REPLACE INTO agent_config (key, value) VALUES (?, ?)",
                                ('telegram_chat_id', chat_id))
+                # Update Enable Status (store as string)
+                cursor.execute("INSERT OR REPLACE INTO agent_config (key, value) VALUES (?, ?)",
+                               ('enable_telegram_alerts', str(enable_alerts).lower()))
                 # Update Token ONLY if a new value was provided
                 if token is not None and token != "":
                     cursor.execute("INSERT OR REPLACE INTO agent_config (key, value) VALUES (?, ?)",
@@ -596,7 +615,7 @@ def manage_telegram_config():
                 else:
                     logging.info("No new telegram_bot_token provided, existing token (if any) remains unchanged.")
 
-            logging.info(f"Updated Telegram configuration in DB: chat_id={chat_id}")
+            logging.info(f"Updated Telegram configuration in DB: chat_id={chat_id}, enabled={enable_alerts}")
             return jsonify({"message": "Telegram configuration saved successfully."}), 200
         except sqlite3.Error as e:
             logging.error(f"DB error saving Telegram config: {e}")
@@ -605,7 +624,8 @@ def manage_telegram_config():
             logging.error(f"Unexpected error saving Telegram config: {e}", exc_info=True)
             return jsonify({"error": "Unexpected error saving Telegram config."}), 500
 
-
+# --- Main Execution ---
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    # Use Gunicorn in production, this is for local dev only
+    app.run(host='0.0.0.0', port=5000, debug=False) # Set debug=False for production-like env
 

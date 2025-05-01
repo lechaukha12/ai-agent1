@@ -1136,6 +1136,7 @@ def investigate_pod_details(namespace, pod_name, initial_reasons, suspicious_log
 
     return logs_for_analysis, k8s_context_str
 
+# --- Updated process_analysis_and_alert ---
 def process_analysis_and_alert(pod_key, initial_reasons, logs_for_analysis, k8s_context_str, config):
     # Pass config down
     namespace, pod_name = pod_key.split('/', 1);
@@ -1145,25 +1146,30 @@ def process_analysis_and_alert(pod_key, initial_reasons, logs_for_analysis, k8s_
     analysis_duration = time.time() - analysis_start_time
     logging.info(f"Analysis for {pod_key} took {analysis_duration:.2f} seconds.")
 
-    severity = analysis_result.get("severity", "UNKNOWN").upper();
-    summary = analysis_result.get("summary", "N/A")
-    root_cause_str = analysis_result.get("root_cause", "N/A")
-    steps_str = analysis_result.get("troubleshooting_steps", "N/A")
+    # --- FIX: Safely get values from analysis_result, defaulting to "N/A" if key missing OR value is None ---
+    severity = (analysis_result.get("severity") or "UNKNOWN").upper() # Ensure uppercase after getting value
+    summary = analysis_result.get("summary") or "N/A"
+    root_cause_str = analysis_result.get("root_cause") or "N/A"
+    steps_str = analysis_result.get("troubleshooting_steps") or "N/A"
+    # --- END FIX ---
 
+    # Logging is now safe because variables are guaranteed to be strings
     logging.info(f"Analysis result for '{pod_key}': Severity={severity}, Summary={summary[:100]}..., RootCause={root_cause_str[:100]}..., Steps={steps_str[:100]}...")
 
     # Prepare sample logs for DB and alert
     sample_logs_str = "\n".join([f"- `{log['message'][:150]}`" for log in logs_for_analysis[:5]]) if logs_for_analysis else "-"
 
-    # Record incident details in the database
+    # Record incident details in the database (using the safe variables)
     record_incident( pod_key, severity, summary, initial_reasons, k8s_context_str, sample_logs_str, final_prompt, raw_response_text, root_cause_str, steps_str )
 
     # Check if severity warrants an alert based on current config
     if severity in config.get('alert_severity_levels', []):
         alert_time_hcm = datetime.now(HCM_TZ); time_format = '%Y-%m-%d %H:%M:%S %Z'
         alert_data = {
-            'pod_key': pod_key, 'severity': severity, 'summary': summary, 'root_cause': root_cause_str,
-            'troubleshooting_steps': steps_str, 'initial_reasons': initial_reasons,
+            'pod_key': pod_key, 'severity': severity, 'summary': summary, # Use safe summary
+            'root_cause': root_cause_str, # Use safe root_cause
+            'troubleshooting_steps': steps_str, # Use safe steps
+            'initial_reasons': initial_reasons,
             'alert_time': alert_time_hcm.strftime(time_format),
             'sample_logs': sample_logs_str if sample_logs_str != "-" else "- Không có log mẫu liên quan."
         }
@@ -1211,7 +1217,7 @@ def perform_monitoring_cycle(last_namespace_refresh_time):
         try:
             # Investigate and get logs/context
             logs_for_analysis, k8s_context_str = investigate_pod_details( namespace, pod_name, initial_reasons, suspicious_logs_found_in_scan, config )
-            # Analyze, record, and potentially alert
+            # Analyze, record, and potentially alert (Pass config down)
             process_analysis_and_alert( pod_key, initial_reasons, logs_for_analysis, k8s_context_str, config )
         except Exception as investigation_err:
             logging.error(f"Error during investigation/analysis for {pod_key}: {investigation_err}", exc_info=True)

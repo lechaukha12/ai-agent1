@@ -11,7 +11,7 @@ import { showLoading, hideLoading, showStatusMessage, hideStatusMessage } from '
 const namespaceListDiv = document.getElementById('namespace-list');
 const namespaceLoadingText = document.getElementById('namespace-loading-text');
 const saveNsConfigButton = document.getElementById('save-ns-config-button');
-const saveNsConfigStatus = document.getElementById('save-ns-config-status'); // Exported from ui.js
+const saveNsConfigStatus = document.getElementById('save-ns-config-status');
 
 const scanIntervalInput = document.getElementById('scan-interval');
 const restartThresholdInput = document.getElementById('restart-threshold');
@@ -19,12 +19,15 @@ const lokiScanLevelSelect = document.getElementById('loki-scan-level');
 const alertCooldownInput = document.getElementById('alert-cooldown');
 const alertLevelsInput = document.getElementById('alert-levels');
 const saveGeneralConfigButton = document.getElementById('save-general-config-button');
-const saveGeneralConfigStatus = document.getElementById('save-general-config-status'); // Exported from ui.js
+const saveGeneralConfigStatus = document.getElementById('save-general-config-status');
 
+// --- ADDED: Telegram Toggle Element ---
+const enableTelegramToggle = document.getElementById('enable-telegram-toggle');
+// -----------------------------------
 const telegramTokenInput = document.getElementById('telegram-token');
 const telegramChatIdInput = document.getElementById('telegram-chat-id');
 const saveTelegramConfigButton = document.getElementById('save-telegram-config-button');
-const saveTelegramConfigStatus = document.getElementById('save-telegram-config-status'); // Exported from ui.js
+const saveTelegramConfigStatus = document.getElementById('save-telegram-config-status');
 
 const enableAiToggle = document.getElementById('enable-ai-toggle');
 const aiProviderOptionsDiv = document.getElementById('ai-provider-options');
@@ -32,15 +35,12 @@ const aiProviderSelect = document.getElementById('ai-provider-select');
 const aiModelIdentifierInput = document.getElementById('ai-model-identifier');
 const aiApiKeyInput = document.getElementById('ai-api-key');
 const saveAiConfigButton = document.getElementById('save-ai-config-button');
-const saveAiConfigStatus = document.getElementById('save-ai-config-status'); // Exported from ui.js
+const saveAiConfigStatus = document.getElementById('save-ai-config-status');
 
 
 // --- Namespace Settings ---
-
-/**
- * Renders the list of namespaces with checkboxes.
- */
 export async function renderNamespaceList() {
+    // ... (renderNamespaceList remains unchanged) ...
     if (!namespaceListDiv || !namespaceLoadingText) return;
     showLoading();
     namespaceListDiv.innerHTML = '';
@@ -51,10 +51,10 @@ export async function renderNamespaceList() {
             fetchMonitoredNamespaces()
         ]);
         namespaceLoadingText.classList.add('hidden');
-        if (availableNamespaces === null || monitoredNamespaces === null) return; // Error handled in API
+        if (availableNamespaces === null || monitoredNamespaces === null) return;
 
         if (availableNamespaces.length === 0) {
-            namespaceListDiv.innerHTML = `<p class="text-gray-500 dark:text-gray-400 col-span-full text-center py-4">Không tìm thấy namespace nào.</p>`;
+            namespaceListDiv.innerHTML = `<p class="text-gray-500 col-span-full text-center py-4">Không tìm thấy namespace nào.</p>`;
         } else {
             availableNamespaces.forEach(ns => {
                 const isChecked = monitoredNamespaces.includes(ns);
@@ -62,10 +62,10 @@ export async function renderNamespaceList() {
                 div.className = 'namespace-item text-sm flex items-center';
                 const checkbox = document.createElement('input');
                 checkbox.type = 'checkbox'; checkbox.id = `ns-${ns}`; checkbox.value = ns; checkbox.checked = isChecked;
-                checkbox.className = 'form-checkbox h-4 w-4 text-indigo-600 transition duration-150 ease-in-out rounded dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-indigo-500';
+                checkbox.className = 'form-checkbox h-4 w-4 text-indigo-600 transition duration-150 ease-in-out rounded border-gray-300 focus:ring-indigo-500'; // Simplified classes
                 const label = document.createElement('label');
                 label.htmlFor = `ns-${ns}`; label.textContent = ns;
-                label.className = 'ml-2 text-gray-700 dark:text-gray-300 cursor-pointer select-none';
+                label.className = 'ml-2 text-gray-700 cursor-pointer select-none'; // Simplified classes
                 div.appendChild(checkbox); div.appendChild(label);
                 namespaceListDiv.appendChild(div);
             });
@@ -79,10 +79,8 @@ export async function renderNamespaceList() {
     }
 }
 
-/**
- * Handles saving the selected monitored namespaces.
- */
 export async function saveMonitoredNamespaces() {
+    // ... (saveMonitoredNamespaces remains unchanged) ...
     if (!saveNsConfigButton || !saveNsConfigStatus) return;
     showLoading();
     saveNsConfigButton.disabled = true;
@@ -108,11 +106,8 @@ export async function saveMonitoredNamespaces() {
 }
 
 // --- General Settings ---
-
-/**
- * Fetches and populates the general settings form.
- */
 export async function loadGeneralSettings() {
+    // ... (loadGeneralSettings remains unchanged) ...
     if (!scanIntervalInput || !restartThresholdInput || !lokiScanLevelSelect || !alertCooldownInput || !alertLevelsInput) return;
      showLoading();
      try {
@@ -130,10 +125,8 @@ export async function loadGeneralSettings() {
      }
 }
 
-/**
- * Handles saving the general agent settings.
- */
 export async function saveGeneralSettings() {
+    // ... (saveGeneralSettings remains unchanged) ...
     if (!saveGeneralConfigButton || !saveGeneralConfigStatus || !scanIntervalInput || !restartThresholdInput || !lokiScanLevelSelect || !alertCooldownInput || !alertLevelsInput) return;
     showLoading();
     saveGeneralConfigButton.disabled = true;
@@ -194,16 +187,20 @@ export async function saveGeneralSettings() {
 // --- Telegram Settings ---
 
 /**
- * Fetches and populates the Telegram settings form.
+ * Fetches and populates the Telegram settings form, including the toggle.
  */
 export async function loadTelegramSettings() {
-    if (!telegramTokenInput || !telegramChatIdInput) return;
+    // Include the new toggle element selector
+    if (!telegramTokenInput || !telegramChatIdInput || !enableTelegramToggle) return;
      showLoading();
      try {
          const config = await fetchTelegramConfigApi();
          telegramTokenInput.value = ''; // Never show token
          telegramTokenInput.placeholder = config.has_token ? '******** (Đã lưu, nhập để thay đổi)' : 'Chưa cấu hình';
          telegramChatIdInput.value = config.telegram_chat_id || '';
+         // --- SET TOGGLE STATE ---
+         enableTelegramToggle.checked = config.enable_telegram_alerts || false; // Default to false if missing
+         // ------------------------
      } catch (error) {
          showStatusMessage(saveTelegramConfigStatus, `Lỗi tải cấu hình Telegram: ${error.message}`, 'error');
          hideStatusMessage(saveTelegramConfigStatus, 5000);
@@ -213,17 +210,23 @@ export async function loadTelegramSettings() {
 }
 
 /**
- * Handles saving the Telegram settings.
+ * Handles saving the Telegram settings, including the toggle state.
  */
 export async function saveTelegramSettings() {
-    if (!saveTelegramConfigButton || !saveTelegramConfigStatus || !telegramTokenInput || !telegramChatIdInput) return;
+    // Include the new toggle element selector
+    if (!saveTelegramConfigButton || !saveTelegramConfigStatus || !telegramTokenInput || !telegramChatIdInput || !enableTelegramToggle) return;
     showLoading();
     saveTelegramConfigButton.disabled = true;
     showStatusMessage(saveTelegramConfigStatus, 'Đang lưu...', 'info');
 
+    // --- READ TOGGLE STATE ---
+    const enableAlerts = enableTelegramToggle.checked;
+    // -------------------------
+
     const configData = {
         telegram_bot_token: telegramTokenInput.value, // Send new token or empty string
-        telegram_chat_id: telegramChatIdInput.value.trim()
+        telegram_chat_id: telegramChatIdInput.value.trim(),
+        enable_telegram_alerts: enableAlerts // Add toggle state to payload
     };
     telegramTokenInput.value = ''; // Clear field immediately
 
@@ -236,7 +239,7 @@ export async function saveTelegramSettings() {
     }
 
     try {
-        await saveTelegramConfigApi(configData);
+        await saveTelegramConfigApi(configData); // API endpoint handles saving all three fields
         showStatusMessage(saveTelegramConfigStatus, 'Đã lưu thành công!', 'success');
         telegramTokenInput.placeholder = '******** (Đã lưu, nhập để thay đổi)'; // Update placeholder
     } catch (error) {
@@ -251,11 +254,8 @@ export async function saveTelegramSettings() {
 
 
 // --- AI Settings ---
-
-/**
- * Fetches and populates the AI settings form.
- */
 export async function loadAiSettings() {
+     // ... (loadAiSettings remains unchanged) ...
      if (!enableAiToggle || !aiProviderSelect || !aiModelIdentifierInput || !aiApiKeyInput || !aiProviderOptionsDiv) return;
      showLoading();
      try {
@@ -275,10 +275,8 @@ export async function loadAiSettings() {
      }
 }
 
-/**
- * Handles saving the AI settings.
- */
 export async function saveAiSettings() {
+    // ... (saveAiSettings remains unchanged) ...
     if (!saveAiConfigButton || !saveAiConfigStatus || !enableAiToggle || !aiProviderSelect || !aiModelIdentifierInput || !aiApiKeyInput) return;
     showLoading();
     saveAiConfigButton.disabled = true;
@@ -313,9 +311,6 @@ export async function saveAiSettings() {
     }
 }
 
-/**
- * Handles the change event for the AI enable toggle.
- */
 export function handleAiToggleChange() {
     if(aiProviderOptionsDiv && enableAiToggle) {
         aiProviderOptionsDiv.classList.toggle('hidden', !enableAiToggle.checked);
