@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Đăng nhập - Bug Tracker</title>
+    <title>Đăng nhập - Obs Engine</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -87,9 +87,8 @@
 
     </style>
 </head>
-<body>
-    <div class="login-card">
-        <h2 class="text-3xl font-bold text-center text-gray-900 dark:text-white mb-2">Bug Tracker</h2>
+<body class="dark:bg-gray-900"> <div class="login-card">
+        <h2 class="text-3xl font-bold text-center text-gray-900 dark:text-white mb-2">Obs Engine</h2>
         <p class="text-sm text-center text-gray-600 dark:text-gray-400 mb-8">Đăng nhập để tiếp tục</p>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -119,7 +118,7 @@
                     <input id="remember" name="remember" type="checkbox" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 dark:border-gray-600 rounded">
                     <label for="remember" class="ml-2 block text-sm text-gray-900 dark:text-gray-300"> Ghi nhớ đăng nhập</label>
                 </div>
-            </div>
+                </div>
             <div>
                 <button type="submit"
                         class="submit-button w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:focus:ring-offset-gray-800">
