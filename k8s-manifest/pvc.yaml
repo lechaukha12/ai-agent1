@@ -1,18 +1,11 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: k8s-log-agent-data-pvc # Tên của PVC
-  namespace: kube-observability # Namespace của agent
+  name: obs-engine-data-pvc
+  namespace: kube-observability
 spec:
-  # Chế độ truy cập:
-  # - ReadWriteOnce: Chỉ mount được bởi 1 node tại 1 thời điểm (phổ biến nhất)
-  # - ReadOnlyMany: Nhiều node mount đọc (lý tưởng nếu portal đọc từ node khác agent)
-  # - ReadWriteMany: Nhiều node mount đọc/ghi (cần storage hỗ trợ như NFS, CephFS)
-  # Chọn ReadWriteOnce cho đơn giản trước, cả agent và portal sẽ cần chạy trên cùng node
-  # Hoặc nếu StorageClass hỗ trợ ReadWriteMany thì càng tốt.
   accessModes:
-    - ReadWriteOnce # Hoặc ReadWriteMany nếu storage hỗ trợ
-  # storageClassName: "" # Bỏ trống để dùng default StorageClass, hoặc chỉ định tên cụ thể
+    - ReadWriteOnce
   resources:
     requests:
-      storage: 1Gi # Yêu cầu 1 GB lưu trữ (cho SQLite là khá dư dả)
+      storage: 2Gi

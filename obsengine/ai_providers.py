@@ -1,4 +1,3 @@
-# ai-agent1/app/ai_providers.py
 import google.generativeai as genai
 import requests
 import json
@@ -6,21 +5,18 @@ import re
 import logging
 import threading
 import os
+from datetime import datetime # <--- Added missing import
 
-# --- Global State for AI Providers ---
 gemini_model_instance = None
 last_used_gemini_api_key = None
 last_used_gemini_model_id = None
 model_calls_counter = 0
 ai_counter_lock = threading.Lock()
 
-# --- Rule-Based Fallback Logic (Moved from main.py) ---
 def determine_severity_from_rules(initial_reasons, log_batch):
-    """Determines a fallback severity based on initial reasons and log keywords."""
-    severity = "INFO" # Default severity
+    severity = "INFO"
     reasons_upper = initial_reasons.upper() if initial_reasons else ""
 
-    # Prioritize K8s reasons for critical/error states
     if "OOMKILLED" in reasons_upper or "FAILED" in reasons_upper:
         severity = "CRITICAL"
     elif "ERROR" in reasons_upper or "CRASHLOOPBACKOFF" in reasons_upper:
@@ -28,18 +24,20 @@ def determine_severity_from_rules(initial_reasons, log_batch):
     elif "UNSCHEDULABLE" in reasons_upper or "IMAGEPULLBACKOFF" in reasons_upper or "BACKOFF" in reasons_upper or "WAITING" in reasons_upper:
         severity = "WARNING"
 
-    # If still INFO or WARNING, check logs for higher severity keywords
     if severity in ["INFO", "WARNING"]:
         critical_keywords = ["CRITICAL", "ALERT", "EMERGENCY", "PANIC", "FATAL"]
         error_keywords = ["ERROR", "EXCEPTION", "DENIED", "REFUSED", "UNAUTHORIZED"]
         warning_keywords = ["WARNING", "WARN", "TIMEOUT", "UNABLE", "SLOW"]
 
-        for entry in log_batch[:20]: # Check first 20 relevant logs
-            log_upper = entry['message'].upper()
+        for entry in log_batch[:20]:
+            log_message = entry.get('message')
+            if not isinstance(log_message, str):
+                continue
+            log_upper = log_message.upper()
             if any(kw in log_upper for kw in critical_keywords):
                 severity = "CRITICAL"; break
             if any(kw in log_upper for kw in error_keywords):
-                severity = "ERROR"; # Continue checking for critical
+                severity = "ERROR";
             if severity == "INFO" and any(kw in log_upper for kw in warning_keywords):
                  severity = "WARNING"
 
@@ -47,19 +45,15 @@ def determine_severity_from_rules(initial_reasons, log_batch):
     return severity
 
 def get_default_analysis(severity, initial_reasons):
-     """Generates a default analysis structure when AI is disabled or fails."""
      summary = f"Phát hiện sự cố tiềm ẩn. Lý do ban đầu: {initial_reasons or 'Không có'}. Mức độ ước tính: {severity}."
-     # Add specific note about AI status
-     if severity != "INFO": # Only add AI note if it's not just INFO
+     if severity != "INFO":
         summary += " (Phân tích AI bị tắt hoặc thất bại)."
      root_cause = "Không có phân tích AI."
      troubleshooting_steps = "Kiểm tra ngữ cảnh Kubernetes và log chi tiết thủ công."
      return {"severity": severity, "summary": summary, "root_cause": root_cause, "troubleshooting_steps": troubleshooting_steps}
 
 
-# --- Internal API Call Helpers ---
 def _call_gemini_api(api_key, model_identifier, prompt):
-    """Internal function to call the Gemini API."""
     global gemini_model_instance, last_used_gemini_api_key, last_used_gemini_model_id
     try:
         needs_reinit = (
@@ -93,7 +87,6 @@ def _call_gemini_api(api_key, model_identifier, prompt):
         raise
 
 def _call_local_api(endpoint_url, prompt):
-    """Internal function to call the local AI endpoint."""
     try:
         response = requests.post(endpoint_url, json={"prompt": prompt}, timeout=120)
         response.raise_for_status()
@@ -102,12 +95,7 @@ def _call_local_api(endpoint_url, prompt):
         logging.error(f"[AI Provider] Error calling local AI endpoint {endpoint_url}: {e}")
         raise
 
-# --- Internal Analysis Execution ---
 def _execute_ai_analysis(provider, api_key, model_id, local_endpoint_url, prompt):
-    """
-    Executes the call to the specified AI provider and handles response parsing.
-    Separated to manage counter logic cleanly.
-    """
     global model_calls_counter
     analysis_result = None
     raw_response_text = None
@@ -167,59 +155,47 @@ def _execute_ai_analysis(provider, api_key, model_id, local_endpoint_url, prompt
 
         else:
              logging.warning(f"[AI Provider] Unsupported AI provider '{provider}' or provider is 'none'. Skipping AI call.")
-             analysis_failed = True # Mark as failed if provider is invalid/none
+             analysis_failed = True
 
     except Exception as e:
         logging.error(f"[AI Provider] Error during AI analysis call (Provider: {provider}): {e}", exc_info=True)
         analysis_failed = True
-        if call_attempted: # Decrement only if call was actually tried
+        if call_attempted:
             with ai_counter_lock:
                 if model_calls_counter > 0: model_calls_counter -= 1
                 logging.warning(f"[AI Provider] Decremented call counter due to error. Current count: {model_calls_counter}")
 
     return analysis_result, raw_response_text, analysis_failed
 
-# --- Main Public Function ---
 def perform_analysis(log_batch, k8s_context, initial_reasons, config, prompt_template):
-    """
-    Performs AI analysis or rule-based analysis based on configuration.
-
-    Args:
-        log_batch (list): List of log entry dictionaries.
-        k8s_context (str): Formatted Kubernetes context string.
-        initial_reasons (str): Initial reasons for investigation.
-        config (dict): The current agent configuration dictionary.
-        prompt_template (str): The template string for the AI prompt.
-
-    Returns:
-        tuple: (dict, str or None, str or None):
-               - Final analysis result dictionary (guaranteed to have required keys).
-               - The final prompt used for AI (or None if AI disabled).
-               - Raw response text from AI (or None if AI disabled/failed).
-    """
     analysis_result = None
     final_prompt = None
     raw_response_text = None
-    analysis_failed = False # Default to not failed
+    analysis_failed = False
 
-    # --- Check if AI Analysis is Enabled ---
     if not config.get('enable_ai_analysis', False):
         logging.info("[AI Analysis] AI analysis is disabled by configuration.")
-        analysis_failed = True # Mark as "failed" to trigger fallback
+        analysis_failed = True
     else:
-        # --- AI Analysis Enabled: Prepare Prompt ---
         namespace = "unknown"; pod_name = "unknown_pod"
-        if log_batch and log_batch[0].get('labels'):
-            labels = log_batch[0].get('labels', {}); namespace = labels.get('namespace', namespace); pod_name = labels.get('pod', pod_name)
+        if log_batch and isinstance(log_batch, list) and len(log_batch) > 0 and isinstance(log_batch[0], dict) and log_batch[0].get('labels'):
+             labels = log_batch[0].get('labels', {}); namespace = labels.get('namespace', namespace); pod_name = labels.get('pod', pod_name)
         elif k8s_context:
-            match_ns = re.search(r"Pod:\s*([\w.-]+)/", k8s_context); match_pod = re.search(r"Pod:\s*[\w.-]+/([\w.-]+)\n", k8s_context);
-            if match_ns: namespace = match_ns.group(1);
-            if match_pod: pod_name = match_pod.group(1)
+             match_ns = re.search(r"Pod:\s*([\w.-]+)/", k8s_context); match_pod = re.search(r"Pod:\s*[\w.-]+/([\w.-]+)\n", k8s_context);
+             if match_ns: namespace = match_ns.group(1);
+             if match_pod: pod_name = match_pod.group(1)
 
         log_text = "N/A"
-        if log_batch:
-            limited_logs = [f"[{entry['timestamp'].isoformat()}] {entry['message'][:500]}" for entry in log_batch[:15]];
-            log_text = "\n".join(limited_logs)
+        if log_batch and isinstance(log_batch, list):
+             limited_logs = []
+             for entry in log_batch[:15]:
+                 if isinstance(entry, dict) and 'timestamp' in entry and 'message' in entry:
+                     ts = entry['timestamp']
+                     ts_str = ts.isoformat() if isinstance(ts, datetime) else str(ts)
+                     msg = str(entry['message'])
+                     limited_logs.append(f"[{ts_str}] {msg[:500]}")
+             log_text = "\n".join(limited_logs)
+
 
         try:
             final_prompt = prompt_template.format(
@@ -229,18 +205,20 @@ def perform_analysis(log_batch, k8s_context, initial_reasons, config, prompt_tem
         except KeyError as e:
             logging.error(f"[AI Analysis] Missing placeholder in PROMPT_TEMPLATE: {e}. Using default prompt structure.")
             final_prompt = f"Phân tích pod {namespace}/{pod_name}. Ngữ cảnh K8s: {k8s_context[:10000]}. Logs: {log_text[:20000]}. Chỉ trả lời bằng JSON với khóa 'severity', 'summary', 'root_cause', 'troubleshooting_steps'."
+        except Exception as format_err:
+             logging.error(f"[AI Analysis] Error formatting prompt: {format_err}. Using default prompt structure.", exc_info=True)
+             final_prompt = f"Phân tích pod {namespace}/{pod_name}. Ngữ cảnh K8s: {k8s_context[:10000]}. Logs: {log_text[:20000]}. Chỉ trả lời bằng JSON với khóa 'severity', 'summary', 'root_cause', 'troubleshooting_steps'."
 
-        # --- Call AI Provider ---
+
         provider = config.get('ai_provider', 'none')
         api_key = config.get('ai_api_key', '')
         model_id = config.get('ai_model_identifier', '')
-        local_endpoint = config.get('local_gemini_endpoint') # Get endpoint from config if passed
+        local_endpoint = config.get('local_gemini_endpoint')
 
         analysis_result, raw_response_text, analysis_failed = _execute_ai_analysis(
             provider, api_key, model_id, local_endpoint, final_prompt
         )
 
-    # --- Fallback if AI failed or was disabled ---
     if analysis_failed or analysis_result is None:
         if analysis_result is None and not analysis_failed:
              logging.warning(f"[AI Analysis] AI analysis function returned successfully but result is None (likely parsing failed). Falling back.")
@@ -249,10 +227,7 @@ def perform_analysis(log_batch, k8s_context, initial_reasons, config, prompt_tem
 
         severity = determine_severity_from_rules(initial_reasons, log_batch)
         analysis_result = get_default_analysis(severity, initial_reasons)
-        # Raw response text might be available even if parsing failed, keep it if so.
-        # If AI was disabled from start, raw_response_text will be None.
 
-    # --- Ensure result format ---
     if not isinstance(analysis_result, dict):
          logging.error(f"[AI Analysis] CRITICAL: Analysis result is not a dictionary after processing. Final fallback.")
          severity = determine_severity_from_rules(initial_reasons, log_batch)
@@ -268,7 +243,6 @@ def perform_analysis(log_batch, k8s_context, initial_reasons, config, prompt_tem
 
 
 def get_and_reset_model_calls():
-    """Gets the current model call count and resets it to zero."""
     global model_calls_counter
     with ai_counter_lock:
         calls = model_calls_counter

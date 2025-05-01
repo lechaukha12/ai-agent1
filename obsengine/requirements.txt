@@ -1,3 +1,6 @@
+Flask
 requests
+google-generativeai
 python-dotenv
 kubernetes
+gunicorn

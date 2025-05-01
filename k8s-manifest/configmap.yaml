@@ -2,83 +2,17 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: k8s-log-agent-config
-  namespace: kube-observability # Đảm bảo namespace này đúng với môi trường của bạn
+  namespace: kube-observability
 data:
-  # --- Core Agent & Connection Settings ---
-  LOKI_URL: "http://loki-loki-distributed-query-frontend:3100" # !!! THAY THẾ BẰNG URL LOKI CỦA BẠN !!!
-  DB_PATH: "/data/agent_stats.db" # Đường dẫn tới file SQLite trên PVC
-  LOCAL_GEMINI_ENDPOINT: ""     # Endpoint cho provider 'local' (nếu dùng)
-
-  # --- Agent Behavior Intervals (Seconds) ---
-  STATS_UPDATE_INTERVAL_SECONDS: "300"  # Tần suất cập nhật DB thống kê
-  NAMESPACE_REFRESH_INTERVAL_SECONDS: "3600" # Tần suất làm mới danh sách namespace từ K8s (1 giờ)
-  CONFIG_REFRESH_INTERVAL_SECONDS: "60"   # Tần suất đọc lại cấu hình từ DB
-
-  # --- Loki Query Parameters (Defaults/Fallbacks) ---
-  # Các giá trị này có thể được ghi đè bởi cài đặt trong Portal nếu được triển khai
+  LOKI_URL: "http://loki-loki-distributed-query-frontend:3100"
+  OBS_ENGINE_URL: "http://obs-engine-service.kube-observability.svc.cluster.local:8080/collect"
+  SCAN_INTERVAL_SECONDS: "30"
+  NAMESPACE_REFRESH_INTERVAL_SECONDS: "3600"
+  CONFIG_REFRESH_INTERVAL_SECONDS: "60"
   LOKI_SCAN_RANGE_MINUTES: "1"
   LOKI_DETAIL_LOG_RANGE_MINUTES: "30"
   LOKI_QUERY_LIMIT: "500"
-
-  # --- Kubernetes Monitoring Settings (Defaults/Fallbacks) ---
-  EXCLUDED_NAMESPACES: "kube-node-lease,kube-public" # Namespace luôn loại trừ
-  DEFAULT_MONITORED_NAMESPACES: "kube-system,default" # Namespace mặc định nếu không có cấu hình trong DB
-
-  # --- Default AI Settings (Used ONLY if DB config is unavailable/invalid) ---
-  # Các cài đặt chính cho AI (enable, provider, model, key) được quản lý qua Portal
-  ENABLE_AI_ANALYSIS: "true"    # Giá trị mặc định nếu không đọc được từ DB
-  AI_PROVIDER: "gemini"         # Giá trị mặc định nếu không đọc được từ DB
-  AI_MODEL_IDENTIFIER: "gemini-1.5-flash" # Giá trị mặc định nếu không đọc được từ DB
-
-  # --- Templates (Should remain here) ---
-  PROMPT_TEMPLATE: |
-    Phân tích tình huống của pod Kubernetes '{namespace}/{pod_name}'.
-    **Ưu tiên xem xét ngữ cảnh Kubernetes** được cung cấp dưới đây vì nó có thể là lý do chính bạn được gọi.
-    Kết hợp với các dòng log sau đây (nếu có) để đưa ra phân tích đầy đủ.
-
-    1.  Xác định mức độ nghiêm trọng tổng thể (chọn một: INFO, WARNING, ERROR, CRITICAL).
-    2.  Nếu mức độ nghiêm trọng là WARNING, ERROR hoặc CRITICAL:
-        a. Cung cấp một bản tóm tắt ngắn gọn (1-2 câu) bằng **tiếng Việt** giải thích vấn đề cốt lõi.
-        b. Đề xuất **nguyên nhân gốc có thể xảy ra** (potential root causes) (ngắn gọn, dạng gạch đầu dòng nếu có nhiều).
-        c. Đề xuất các **bước khắc phục sự cố** (suggested troubleshooting steps) (ngắn gọn, dạng gạch đầu dòng).
-
-    Ngữ cảnh Kubernetes:
-    --- START CONTEXT ---
-    {k8s_context}
-    --- END CONTEXT ---
-
-    Các dòng log (có thể không có):
-    --- START LOGS ---
-    {log_text}
-    --- END LOGS ---
-
-    Chỉ trả lời bằng định dạng JSON với các khóa "severity", "summary", "root_cause", và "troubleshooting_steps".
-    Ví dụ:
-    {{
-      "severity": "CRITICAL",
-      "summary": "Pod 'kube-system/oomkill-pod' bị Terminated với lý do OOMKilled.",
-      "root_cause": "- Giới hạn bộ nhớ (memory limit) quá thấp.\n- Ứng dụng bị rò rỉ bộ nhớ (memory leak).",
-      "troubleshooting_steps": "- Tăng memory limit cho pod.\n- Phân tích memory profile của ứng dụng.\n- Kiểm tra lại logic cấp phát/giải phóng bộ nhớ trong code."
-    }}
-
-  TELEGRAM_ALERT_TEMPLATE: |
-    🚨 *Cảnh báo K8s/Log (Pod: {pod_key})* 🚨
-    *Mức độ:* `{severity}`
-    *Tóm tắt:* {summary}
-    *Nguyên nhân gốc có thể:*
-    {root_cause}
-    *Đề xuất khắc phục:*
-    {troubleshooting_steps}
-    *Lý do phát hiện ban đầu:* {initial_reasons}
-    *Thời gian phát hiện:* `{alert_time}`
-    *Log mẫu (nếu có):*
-    {sample_logs}
-
-    _Vui lòng kiểm tra chi tiết trên dashboard hoặc Loki/Kubernetes._
-
-  # --- Các tham số đã chuyển sang Portal/DB (không cần ở đây nữa) ---
-  # LOKI_SCAN_MIN_LEVEL: "INFO"
-  # SCAN_INTERVAL_SECONDS: "30"
-  # RESTART_COUNT_THRESHOLD: "5"
-  # ALERT_SEVERITY_LEVELS: "INFO,WARNING,ERROR,CRITICAL"
-  # ALERT_COOLDOWN_MINUTES: "30"
+  LOKI_SCAN_MIN_LEVEL: "INFO"
+  EXCLUDED_NAMESPACES: "kube-node-lease,kube-public"
+  DEFAULT_MONITORED_NAMESPACES: "kube-system,default"
+  RESTART_COUNT_THRESHOLD: "5"

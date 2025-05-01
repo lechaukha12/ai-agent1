@@ -1,33 +1,53 @@
-# ai-agent1/app/loki_client.py
 import requests
 import json
 import logging
 import re
 from datetime import datetime, timezone
 
+LOG_LEVELS = ["DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"]
+PROBLEM_KEYWORDS = ["FAIL", "ERROR", "CRASH", "EXCEPTION", "UNAVAILABLE", "FATAL", "PANIC", "TIMEOUT", "DENIED", "REFUSED", "UNABLE", "UNAUTHORIZED", "OOM", "KILL"]
+
+def _parse_loki_response(response_data):
+    log_entries = []
+    if 'data' in response_data and 'result' in response_data['data']:
+        for stream in response_data['data']['result']:
+            stream_labels = stream.get('stream', {})
+            for timestamp_ns, log_line in stream.get('values', []):
+                try:
+                    ts = datetime.fromtimestamp(int(timestamp_ns) / 1e9, tz=timezone.utc)
+                    log_entries.append({
+                        "timestamp": ts,
+                        "message": log_line.strip(),
+                        "labels": stream_labels
+                    })
+                except (ValueError, TypeError) as e:
+                    logging.warning(f"Could not parse timestamp '{timestamp_ns}' or log line: {e}. Log: {log_line[:100]}")
+                    continue
+    return log_entries
+
 def scan_loki_for_suspicious_logs(loki_url, start_time, end_time, namespaces_to_scan, loki_scan_min_level):
-    """Scans Loki for logs matching keywords or minimum severity level."""
     loki_api_endpoint = f"{loki_url}/loki/api/v1/query_range"
     if not namespaces_to_scan:
-        logging.info("[Loki Client] No namespaces to scan in Loki.")
+        logging.info("[Loki Client] No namespaces provided for Loki scan.")
         return {}
-
-    log_levels_all = ["DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"]
-    scan_level_index = -1
     try:
-        scan_level_index = log_levels_all.index(loki_scan_min_level.upper())
+        scan_level_index = LOG_LEVELS.index(loki_scan_min_level.upper())
     except ValueError:
         logging.warning(f"[Loki Client] Invalid LOKI_SCAN_MIN_LEVEL: {loki_scan_min_level}. Defaulting to WARNING.")
-        scan_level_index = log_levels_all.index("WARNING")
-    levels_to_scan = log_levels_all[scan_level_index:]
-
-    namespace_regex = "|".join(namespaces_to_scan)
-    keywords_to_find = levels_to_scan + ["fail", "crash", "exception", "panic", "fatal", "timeout", "denied", "refused", "unable", "unauthorized", "error"]
-    escaped_keywords = [re.escape(k) for k in sorted(list(set(keywords_to_find)), key=len, reverse=True)]
+        scan_level_index = LOG_LEVELS.index("WARNING")
+    levels_to_scan = LOG_LEVELS[scan_level_index:]
+    keywords_to_find = sorted(list(set(levels_to_scan + PROBLEM_KEYWORDS)), key=len, reverse=True)
+    escaped_keywords = [re.escape(k) for k in keywords_to_find]
     regex_pattern = "(?i)(" + "|".join(escaped_keywords) + ")"
-    logql_query = f'{{namespace=~"{namespace_regex}"}} |~ `{regex_pattern}`'
-    query_limit_scan = 2000
 
+    # --- FIX: Remove re.escape() for namespace names ---
+    # Namespace names in LogQL label matchers generally don't need escaping for regex.
+    # Escaping hyphens (like in kube-system) causes the "invalid char escape" error.
+    namespace_regex = "|".join(namespaces_to_scan)
+    # ----------------------------------------------------
+
+    logql_query = f'{{namespace=~"{namespace_regex}"}} |~ `{regex_pattern}`'
+    query_limit_scan = 1000
     params = {
         'query': logql_query,
         'start': int(start_time.timestamp() * 1e9),
@@ -36,36 +56,39 @@ def scan_loki_for_suspicious_logs(loki_url, start_time, end_time, namespaces_to_
         'direction': 'forward'
     }
     logging.info(f"[Loki Client] Scanning Loki (Level >= {loki_scan_min_level} or keywords) in {len(namespaces_to_scan)} namespaces...")
+    logging.debug(f"[Loki Client] Scan LogQL Query: {logql_query}")
+    logging.debug(f"[Loki Client] Scan Time Range: {start_time.isoformat()} to {end_time.isoformat()}")
     suspicious_logs_by_pod = {}
     try:
         headers = {'Accept': 'application/json'}
-        response = requests.get(loki_api_endpoint, params=params, headers=headers, timeout=60)
+        response = requests.get(loki_api_endpoint, params=params, headers=headers, timeout=90)
         response.raise_for_status()
         data = response.json()
-        if 'data' in data and 'result' in data['data']:
-            count = 0
-            for stream in data['data']['result']:
-                labels = stream.get('stream', {})
-                ns = labels.get('namespace')
-                pod_name = labels.get('pod')
-                if not ns or not pod_name: continue
-                pod_key = f"{ns}/{pod_name}"
-                if pod_key not in suspicious_logs_by_pod: suspicious_logs_by_pod[pod_key] = []
-                for timestamp_ns, log_line in stream['values']:
-                    log_entry = {
-                        "timestamp": datetime.fromtimestamp(int(timestamp_ns) / 1e9, tz=timezone.utc),
-                        "message": log_line.strip(),
-                        "labels": labels
-                    }
-                    suspicious_logs_by_pod[pod_key].append(log_entry)
-                    count += 1
+        log_entries = _parse_loki_response(data)
+        count = 0
+        for entry in log_entries:
+            labels = entry.get('labels', {})
+            ns = labels.get('namespace')
+            pod_name = labels.get('pod')
+            if not ns or not pod_name:
+                logging.debug(f"Skipping log entry with missing namespace/pod labels: {entry.get('message', '')[:100]}")
+                continue
+            pod_key = f"{ns}/{pod_name}"
+            if pod_key not in suspicious_logs_by_pod:
+                suspicious_logs_by_pod[pod_key] = []
+            suspicious_logs_by_pod[pod_key].append(entry)
+            count += 1
+        if count > 0:
             logging.info(f"[Loki Client] Loki scan found {count} suspicious log entries across {len(suspicious_logs_by_pod)} pods.")
         else:
             logging.info("[Loki Client] Loki scan found no suspicious log entries matching the criteria.")
+        for pod_key in suspicious_logs_by_pod:
+             suspicious_logs_by_pod[pod_key].sort(key=lambda x: x.get('timestamp', datetime.min.replace(tzinfo=timezone.utc)))
         return suspicious_logs_by_pod
     except requests.exceptions.HTTPError as e:
         error_detail = ""
-        try: error_detail = e.response.text[:500]
+        try:
+            error_detail = e.response.text[:500] + ('...' if len(e.response.text) > 500 else '')
         except Exception: pass
         logging.error(f"[Loki Client] Error scanning Loki (HTTP {e.response.status_code}): {e}. Response: {error_detail}")
         return {}
@@ -80,7 +103,6 @@ def scan_loki_for_suspicious_logs(loki_url, start_time, end_time, namespaces_to_
         return {}
 
 def query_loki_for_pod(loki_url, namespace, pod_name, start_time, end_time, query_limit):
-    """Queries Loki for detailed logs of a specific pod within a time range."""
     loki_api_endpoint = f"{loki_url}/loki/api/v1/query_range"
     logql_query = f'{{namespace="{namespace}", pod="{pod_name}"}}'
     params = {
@@ -90,30 +112,25 @@ def query_loki_for_pod(loki_url, namespace, pod_name, start_time, end_time, quer
         'limit': query_limit,
         'direction': 'forward'
     }
-    logging.info(f"[Loki Client] Querying Loki for pod '{namespace}/{pod_name}' from {start_time} to {end_time}")
+    logging.info(f"[Loki Client] Querying detailed logs for pod '{namespace}/{pod_name}' from {start_time.isoformat()} to {end_time.isoformat()}")
+    logging.debug(f"[Loki Client] Detail LogQL Query: {logql_query}")
     try:
         headers = {'Accept': 'application/json'}
-        response = requests.get(loki_api_endpoint, params=params, headers=headers, timeout=45)
+        response = requests.get(loki_api_endpoint, params=params, headers=headers, timeout=60)
         response.raise_for_status()
         data = response.json()
-        if 'data' in data and 'result' in data['data']:
-            log_entries = []
-            for stream in data['data']['result']:
-                stream_labels = stream.get('stream', {})
-                for timestamp_ns, log_line in stream['values']:
-                    log_entries.append({
-                        "timestamp": datetime.fromtimestamp(int(timestamp_ns) / 1e9, tz=timezone.utc),
-                        "message": log_line.strip(),
-                        "labels": stream_labels
-                    })
-            log_entries.sort(key=lambda x: x['timestamp'])
-            logging.info(f"[Loki Client] Received {len(log_entries)} log entries from Loki for pod '{namespace}/{pod_name}'.")
-            return log_entries
-        else:
-            logging.warning(f"[Loki Client] No 'result' data found in Loki response for pod '{namespace}/{pod_name}'.")
-            return []
+        log_entries = _parse_loki_response(data)
+        log_entries.sort(key=lambda x: x.get('timestamp', datetime.min.replace(tzinfo=timezone.utc)))
+        logging.info(f"[Loki Client] Received {len(log_entries)} detailed log entries from Loki for pod '{namespace}/{pod_name}'.")
+        return log_entries
+    except requests.exceptions.HTTPError as e:
+        error_detail = ""
+        try: error_detail = e.response.text[:500] + ('...' if len(e.response.text) > 500 else '')
+        except Exception: pass
+        logging.error(f"[Loki Client] Error querying Loki for pod '{namespace}/{pod_name}' (HTTP {e.response.status_code}): {e}. Response: {error_detail}")
+        return []
     except requests.exceptions.RequestException as e:
-        logging.error(f"[Loki Client] Error querying Loki for pod '{namespace}/{pod_name}': {e}")
+        logging.error(f"[Loki Client] Error querying Loki for pod '{namespace}/{pod_name}' (Request failed): {e}")
         return []
     except json.JSONDecodeError as e:
         logging.error(f"[Loki Client] Error decoding Loki JSON response for pod '{namespace}/{pod_name}': {e}")
@@ -121,38 +138,3 @@ def query_loki_for_pod(loki_url, namespace, pod_name, start_time, end_time, quer
     except Exception as e:
         logging.error(f"[Loki Client] Unexpected error querying Loki for pod '{namespace}/{pod_name}': {e}", exc_info=True)
         return []
-
-def preprocess_and_filter(log_entries, loki_scan_min_level):
-    """Filters log entries based on severity level or keywords."""
-    filtered_logs = []
-    log_levels = ["DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"]
-    min_level_index = -1
-    try:
-        min_level_index = log_levels.index(loki_scan_min_level.upper())
-    except ValueError:
-        logging.warning(f"[Loki Client] Invalid LOKI_SCAN_MIN_LEVEL: {loki_scan_min_level}. Defaulting to WARNING.")
-        min_level_index = log_levels.index("WARNING")
-    keywords_indicating_problem = ["FAIL", "ERROR", "CRASH", "EXCEPTION", "UNAVAILABLE", "FATAL", "PANIC", "TIMEOUT", "DENIED", "REFUSED", "UNABLE", "UNAUTHORIZED"]
-
-    for entry in log_entries:
-        log_line = entry['message']
-        log_line_upper = log_line.upper()
-        level_detected = False
-        for i, level in enumerate(log_levels):
-            if f" {level} " in f" {log_line_upper} " or \
-               log_line_upper.startswith(level+":") or \
-               f"[{level}]" in log_line_upper or \
-               f"level={level.lower()}" in log_line_upper or \
-               f"\"level\":\"{level.lower()}\"" in log_line_upper:
-                if i >= min_level_index:
-                    filtered_logs.append(entry)
-                    level_detected = True
-                    break
-        if not level_detected:
-            if any(keyword in log_line_upper for keyword in keywords_indicating_problem):
-                    warning_index = log_levels.index("WARNING")
-                    if min_level_index <= warning_index:
-                        filtered_logs.append(entry)
-    logging.info(f"[Loki Client] Filtered {len(log_entries)} logs down to {len(filtered_logs)} relevant logs (Scan Level: {loki_scan_min_level}).")
-    return filtered_logs
-

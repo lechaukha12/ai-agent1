@@ -1,0 +1,9 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY app/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app/main.py .
+COPY app/config_manager.py .
+COPY app/k8s_monitor.py .
+COPY app/loki_client.py .
+CMD ["python", "-u", "main.py"]

@@ -50,7 +50,6 @@ spec:
             requests:
               cpu: "200m"
               memory: "512Mi"
-          # Added health checks back
           readinessProbe:
             httpGet:
               path: /healthz
@@ -83,3 +82,20 @@ spec:
       maxSurge: 25%
   revisionHistoryLimit: 10
   progressDeadlineSeconds: 600
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: obs-engine-service
+  namespace: kube-observability
+  labels:
+    app: obs-engine
+spec:
+  selector:
+    app: obs-engine
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
