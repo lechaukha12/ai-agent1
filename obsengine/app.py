@@ -24,41 +24,28 @@ try:
     logger.info("Importing config_manager...")
     import config_manager
     logger.info("Imported config_manager.")
-    try:
-        logger.info(f"Imported config_manager from: {config_manager.__file__}")
-    except Exception as file_err:
-        logger.error(f"Error getting config_manager.__file__: {file_err}")
-    try:
-        logger.info(f"Attributes in imported config_manager: {dir(config_manager)}")
-    except Exception as dir_err:
-        logger.error(f"Error getting dir(config_manager): {dir_err}")
+    try: logger.info(f"Imported config_manager from: {config_manager.__file__}")
+    except: pass
+    try: logger.info(f"Attributes in imported config_manager: {dir(config_manager)}")
+    except: pass
 
     logger.info("Importing db_manager...")
     import db_manager
     logger.info("Imported db_manager.")
-    try:
-        logger.info(f"Imported db_manager from: {db_manager.__file__}")
-    except Exception as file_err:
-        logger.error(f"Error getting db_manager.__file__: {file_err}")
-
+    try: logger.info(f"Imported db_manager from: {db_manager.__file__}")
+    except: pass
 
     logger.info("Importing ai_providers...")
     import ai_providers
     logger.info("Imported ai_providers.")
-    try:
-        logger.info(f"Imported ai_providers from: {ai_providers.__file__}")
-    except Exception as file_err:
-        logger.error(f"Error getting ai_providers.__file__: {file_err}")
-
+    try: logger.info(f"Imported ai_providers from: {ai_providers.__file__}")
+    except: pass
 
     logger.info("Importing notifier...")
     import notifier
     logger.info("Imported notifier.")
-    try:
-        logger.info(f"Imported notifier from: {notifier.__file__}")
-    except Exception as file_err:
-        logger.error(f"Error getting notifier.__file__: {file_err}")
-
+    try: logger.info(f"Imported notifier from: {notifier.__file__}")
+    except: pass
 
 except ImportError as e:
     logger.critical(f"Failed to import core module: {e}", exc_info=True)
@@ -118,6 +105,7 @@ def get_initial_db_defaults():
 
 logger.info("Initializing database via db_manager.init_db...")
 try:
+    # Pass DB_PATH obtained earlier
     if not db_manager.init_db(DB_PATH, get_initial_db_defaults()):
         logger.critical("db_manager.init_db returned False! Check permissions, DB path, and DB logs.")
     else:
@@ -125,35 +113,60 @@ try:
 except Exception as e:
     logger.critical(f"Exception during db_manager.init_db call: {e}", exc_info=True)
 
-def periodic_stat_update_thread():
+def periodic_background_tasks_thread():
+    """Background thread for periodic tasks like stats update and agent cleanup."""
     try:
-        interval = 300
+        # Get intervals from config or use defaults
+        stats_interval = 300
+        agent_cleanup_interval = 3600 # Check inactive agents every hour
+        agent_timeout = 86400 # Consider agent inactive after 1 day
+
         if hasattr(config_manager, 'get_stats_update_interval') and callable(config_manager.get_stats_update_interval):
-            interval = config_manager.get_stats_update_interval()
-            logger.info(f"Starting periodic stats update thread. Interval: {interval} seconds.")
+            stats_interval = config_manager.get_stats_update_interval()
         else:
              logger.error("config_manager.get_stats_update_interval function not found! Using fallback interval 300s.")
              try: logger.error(f"config_manager imported from: {config_manager.__file__}")
              except: pass
 
+        # Add config for agent cleanup interval/timeout if needed, or use defaults here
+        # agent_cleanup_interval = config_manager.get_agent_cleanup_interval(...)
+        # agent_timeout = config_manager.get_agent_timeout(...)
+
+        logger.info(f"Starting periodic background tasks thread. Stats Interval: {stats_interval}s, Agent Cleanup Interval: {agent_cleanup_interval}s")
+        last_agent_cleanup_time = time.time()
 
         while True:
-            time.sleep(interval)
+            time.sleep(stats_interval) # Sleep for the stats interval
+
+            # Update Daily Stats
             logger.debug("Triggering periodic stats update...")
             try:
                 db_manager.update_daily_stats(DB_PATH)
             except Exception as update_err:
                  logger.error(f"Error during db_manager.update_daily_stats: {update_err}", exc_info=True)
-    except Exception as thread_init_err:
-         logger.error(f"Error initializing periodic_stat_update_thread: {thread_init_err}", exc_info=True)
 
-logger.info("Attempting to start background stats thread...")
+            # Check if it's time for agent cleanup
+            current_time = time.time()
+            if current_time - last_agent_cleanup_time >= agent_cleanup_interval:
+                logger.debug("Triggering periodic agent cleanup...")
+                try:
+                    deleted_count = db_manager.cleanup_inactive_agents(DB_PATH, agent_timeout)
+                    logger.debug(f"Agent cleanup finished. Removed {deleted_count} inactive agents.")
+                    last_agent_cleanup_time = current_time
+                except Exception as cleanup_err:
+                    logger.error(f"Error during db_manager.cleanup_inactive_agents: {cleanup_err}", exc_info=True)
+
+    except Exception as thread_init_err:
+         logger.error(f"Error initializing periodic_background_tasks_thread: {thread_init_err}", exc_info=True)
+
+logger.info("Attempting to start background tasks thread...")
 try:
-    stats_thread = threading.Thread(target=periodic_stat_update_thread, daemon=True)
-    stats_thread.start()
-    logger.info("Background stats thread started.")
+    # Rename thread target function
+    background_thread = threading.Thread(target=periodic_background_tasks_thread, daemon=True)
+    background_thread.start()
+    logger.info("Background tasks thread started.")
 except Exception as e:
-    logger.error(f"Failed to start stats thread: {e}", exc_info=True)
+    logger.error(f"Failed to start background tasks thread: {e}", exc_info=True)
 
 
 @app.route('/healthz')
@@ -177,7 +190,8 @@ def collect_data():
         logger.error(f"Error getting or parsing JSON data: {e}", exc_info=True)
         return jsonify({"error": "Failed to parse JSON data"}), 400
 
-    required_fields = ["pod_key", "k8s_context", "logs", "initial_reasons", "collection_timestamp"]
+    # --- ADDED: Extract agent_id and cluster_name ---
+    required_fields = ["pod_key", "k8s_context", "logs", "initial_reasons", "collection_timestamp", "agent_id", "cluster_name"]
     missing_fields = [field for field in required_fields if field not in data]
     if missing_fields:
         error_msg = f"Missing required fields: {', '.join(missing_fields)}"
@@ -189,73 +203,75 @@ def collect_data():
     logs = data.get("logs", [])
     initial_reasons = data.get("initial_reasons", [])
     collection_timestamp_str = data.get("collection_timestamp")
+    agent_id = data.get("agent_id") # Get agent_id
+    cluster_name = data.get("cluster_name") # Get cluster_name
 
-    logger.info(f"Processing data for pod: {pod_key}")
-    logger.debug(f"Initial Reasons: {initial_reasons}")
-    logger.debug(f"Number of Logs Received: {len(logs)}")
-    logger.debug(f"Collection Timestamp: {collection_timestamp_str}")
+    logger.info(f"Processing data for pod: {pod_key} from Agent: {agent_id} (Cluster: {cluster_name})")
+    # ---------------------------------------------
+
+    # --- ADDED: Update agent heartbeat ---
+    try:
+        db_manager.update_agent_heartbeat(DB_PATH, agent_id, cluster_name, received_time.isoformat())
+    except Exception as heartbeat_err:
+        # Log error but continue processing the data
+        logger.error(f"Failed to update heartbeat for agent {agent_id}: {heartbeat_err}", exc_info=True)
+    # -------------------------------------
 
     try:
-        logger.debug(f"[{pod_key}] Loading configurations...")
+        logger.debug(f"[{pod_key} @ {cluster_name}] Loading configurations...")
         ai_config = config_manager.get_ai_config()
         alert_config = config_manager.get_alert_config()
         db_path_local = config_manager.get_db_path()
-        logger.debug(f"[{pod_key}] Configurations loaded.")
+        logger.debug(f"[{pod_key} @ {cluster_name}] Configurations loaded.")
 
-        logger.debug(f"[{pod_key}] Performing analysis...")
+        logger.debug(f"[{pod_key} @ {cluster_name}] Performing analysis...")
         analysis_result, final_prompt, raw_response_text = ai_providers.perform_analysis(
             logs, k8s_context, "; ".join(initial_reasons), ai_config, ai_config.get('prompt_template')
         )
-        logger.debug(f"[{pod_key}] Analysis complete.")
+        logger.debug(f"[{pod_key} @ {cluster_name}] Analysis complete.")
 
         severity = analysis_result.get("severity", "UNKNOWN").upper()
         summary = analysis_result.get("summary", "N/A")
-
-        # --- FIX: Ensure root_cause and steps are strings ---
         root_cause_raw = analysis_result.get("root_cause", "N/A")
         steps_raw = analysis_result.get("troubleshooting_steps", "N/A")
-
         root_cause = "\n".join(root_cause_raw) if isinstance(root_cause_raw, list) else str(root_cause_raw)
         steps = "\n".join(steps_raw) if isinstance(steps_raw, list) else str(steps_raw)
-        # ----------------------------------------------------
 
-        logger.info(f"[{pod_key}] Analysis result: Severity={severity}")
-        logger.debug(f"[{pod_key}] Summary: {summary}")
-        # Log the processed string versions
-        logger.debug(f"[{pod_key}] Root Cause (processed): {root_cause}")
-        logger.debug(f"[{pod_key}] Steps (processed): {steps}")
+        logger.info(f"[{pod_key} @ {cluster_name}] Analysis result: Severity={severity}")
+        logger.debug(f"[{pod_key} @ {cluster_name}] Summary: {summary}")
 
-
-        logger.debug(f"[{pod_key}] Recording incident...")
+        logger.debug(f"[{pod_key} @ {cluster_name}] Recording incident...")
         sample_logs_str = "\n".join([f"- {log.get('message', '')[:150]}" for log in logs[:5]]) if logs else "-"
+        # Add cluster_name to incident data if needed in the table later
         db_manager.record_incident(
             db_path_local, pod_key, severity, summary, "; ".join(initial_reasons),
             k8s_context, sample_logs_str, alert_config.get('alert_severity_levels', []),
-            final_prompt, raw_response_text,
-            root_cause, # Pass the guaranteed string version
-            steps       # Pass the guaranteed string version
+            final_prompt, raw_response_text, root_cause, steps
+            # Add cluster_name=cluster_name here if the function is updated
         )
-        logger.debug(f"[{pod_key}] Incident recorded.")
+        logger.debug(f"[{pod_key} @ {cluster_name}] Incident recorded.")
 
         alert_levels = alert_config.get('alert_severity_levels', [])
         cooldown_minutes = alert_config.get('alert_cooldown_minutes', 30)
 
-        logger.debug(f"[{pod_key}] Checking alert conditions (Severity: {severity}, Threshold: {alert_levels})...")
+        logger.debug(f"[{pod_key} @ {cluster_name}] Checking alert conditions...")
         if severity in alert_levels:
-            logger.debug(f"[{pod_key}] Checking cooldown...")
-            if not db_manager.is_pod_in_cooldown(db_path_local, pod_key):
-                logger.info(f"[{pod_key}] Severity meets threshold and not in cooldown. Processing alert.")
+            logger.debug(f"[{pod_key} @ {cluster_name}] Checking cooldown...")
+            if not db_manager.is_pod_in_cooldown(db_path_local, pod_key): # Cooldown is per pod_key, maybe per cluster+pod?
+                logger.info(f"[{pod_key} @ {cluster_name}] Severity meets threshold and not in cooldown. Processing alert.")
                 if alert_config.get('enable_telegram_alerts'):
                     bot_token = alert_config.get('telegram_bot_token')
                     chat_id = alert_config.get('telegram_chat_id')
                     if bot_token and chat_id:
-                        logger.debug(f"[{pod_key}] Sending Telegram alert...")
+                        logger.debug(f"[{pod_key} @ {cluster_name}] Sending Telegram alert...")
                         alert_time_hcm = received_time.astimezone(notifier.HCM_TZ)
                         time_format = '%Y-%m-%d %H:%M:%S %Z'
+                        # Add cluster name to alert data
                         alert_data = {
-                            'pod_key': pod_key, 'severity': severity, 'summary': summary,
-                            'root_cause': root_cause, # Use processed string
-                            'troubleshooting_steps': steps, # Use processed string
+                            'pod_key': f"{cluster_name}/{pod_key}", # Prepend cluster name? Or add separate field
+                            'cluster_name': cluster_name,
+                            'severity': severity, 'summary': summary,
+                            'root_cause': root_cause, 'troubleshooting_steps': steps,
                             'initial_reasons': "; ".join(initial_reasons),
                             'alert_time': alert_time_hcm.strftime(time_format),
                             'sample_logs': sample_logs_str
@@ -264,35 +280,52 @@ def collect_data():
                             bot_token, chat_id, alert_data, ai_config.get('enable_ai_analysis')
                         )
                         if alert_sent:
-                            logger.debug(f"[{pod_key}] Alert sent. Setting cooldown...")
+                            logger.debug(f"[{pod_key} @ {cluster_name}] Alert sent. Setting cooldown...")
                             db_manager.set_pod_cooldown(db_path_local, pod_key, cooldown_minutes)
                         else:
-                            logger.warning(f"[{pod_key}] Telegram alert sending failed, cooldown NOT set.")
+                            logger.warning(f"[{pod_key} @ {cluster_name}] Telegram alert sending failed, cooldown NOT set.")
                     else:
-                        logger.warning(f"[{pod_key}] Telegram alerts enabled but token/chat_id missing. Setting cooldown anyway.")
+                        logger.warning(f"[{pod_key} @ {cluster_name}] Telegram alerts enabled but token/chat_id missing. Setting cooldown anyway.")
                         db_manager.set_pod_cooldown(db_path_local, pod_key, cooldown_minutes)
                 else:
-                    logger.info(f"[{pod_key}] Telegram alerts disabled. Setting cooldown.")
+                    logger.info(f"[{pod_key} @ {cluster_name}] Telegram alerts disabled. Setting cooldown.")
                     db_manager.set_pod_cooldown(db_path_local, pod_key, cooldown_minutes)
             else:
-                logger.info(f"[{pod_key}] Pod is in cooldown. Alert processing skipped.")
+                logger.info(f"[{pod_key} @ {cluster_name}] Pod is in cooldown. Alert processing skipped.")
         else:
-             logger.info(f"[{pod_key}] Severity does not meet alert threshold. No alert needed.")
+             logger.info(f"[{pod_key} @ {cluster_name}] Severity does not meet alert threshold. No alert needed.")
 
-        logger.info(f"--- Successfully processed data for {pod_key} ---")
+        logger.info(f"--- Successfully processed data for {pod_key} from Agent {agent_id} ---")
         return jsonify({"message": f"Data processed successfully for {pod_key}"}), 200
 
     except AttributeError as ae:
-         logger.error(f"--- AttributeError processing data for pod {pod_key}: {ae} ---", exc_info=True)
+         logger.error(f"--- AttributeError processing data for pod {pod_key} from Agent {agent_id}: {ae} ---", exc_info=True)
          if 'config_manager' in str(ae):
-             try:
-                 logger.error(f"Attributes currently in config_manager: {dir(config_manager)}")
-             except Exception as dir_err:
-                 logger.error(f"Could not get dir(config_manager) on error: {dir_err}")
+             try: logger.error(f"Attributes currently in config_manager: {dir(config_manager)}")
+             except: pass
          return jsonify({"error": f"Internal server error (AttributeError) processing data for {pod_key}"}), 500
     except Exception as e:
-        logger.error(f"--- Error processing data for pod {pod_key}: {e} ---", exc_info=True)
+        logger.error(f"--- Error processing data for pod {pod_key} from Agent {agent_id}: {e} ---", exc_info=True)
         return jsonify({"error": f"Internal server error processing data for {pod_key}"}), 500
+
+
+# --- ADDED: API Endpoint for Agent Status ---
+@app.route('/api/agents/status', methods=['GET'])
+def get_agent_status():
+    logger.info("--- /api/agents/status endpoint hit ---")
+    try:
+        # Get timeout from config or use a default (e.g., 5 minutes = 300 seconds)
+        agent_timeout = 300 # Example default
+        # if hasattr(config_manager, 'get_agent_timeout'):
+        #    agent_timeout = config_manager.get_agent_timeout()
+
+        active_agents = db_manager.get_active_agents(DB_PATH, agent_timeout)
+        logger.info(f"Returning status for {len(active_agents)} active agents.")
+        return jsonify({"active_agents": active_agents}), 200
+    except Exception as e:
+        logger.error(f"Error getting agent status: {e}", exc_info=True)
+        return jsonify({"error": "Failed to retrieve agent status"}), 500
+# ------------------------------------------
 
 
 if __name__ == '__main__':
@@ -303,3 +336,4 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=flask_port, debug=debug_mode)
 
 logger.info("--- ObsEngine app.py finished parsing (module level) ---")
+
