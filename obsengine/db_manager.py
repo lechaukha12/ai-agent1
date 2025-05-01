@@ -1,4 +1,4 @@
-# ai-agent1/obsengine/db_manager.py (Removed Semicolons)
+# ai-agent1/obsengine/db_manager.py (Revised init_db)
 import sqlite3
 import os
 import logging
@@ -48,11 +48,11 @@ def init_db(db_path, default_configs={}):
         return False
 
     try:
-        with conn:
+        with conn: # This block starts around line 60
             cursor = conn.cursor()
             logging.info("[DB Manager] Ensuring database tables exist...")
 
-            # --- Define SQL statements separately (Semicolons removed) ---
+            # --- Define SQL statements separately ---
             sql_create_incidents = """
                 CREATE TABLE IF NOT EXISTS incidents (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,11 +91,11 @@ def init_db(db_path, default_configs={}):
                     cooldown_until TEXT NOT NULL
                 )"""
             sql_create_users = """
-                 CREATE TABLE IF NOT EXISTS users (
-                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                     username TEXT UNIQUE NOT NULL,
-                     password TEXT NOT NULL
-                 )"""
+                    CREATE TABLE IF NOT EXISTS users (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        username TEXT UNIQUE NOT NULL,
+                        password TEXT NOT NULL
+                    )"""
             sql_create_active_agents = """
                 CREATE TABLE IF NOT EXISTS active_agents (
                     agent_id TEXT PRIMARY KEY,
@@ -129,6 +129,7 @@ def init_db(db_path, default_configs={}):
         logging.info(f"[DB Manager] Database initialization/check complete at {db_path}")
         return True
     except sqlite3.Error as e:
+        # Log the specific SQL error
         logging.error(f"[DB Manager] Database error during initialization: {e}", exc_info=True)
         return False
     except Exception as e:
@@ -139,6 +140,7 @@ def init_db(db_path, default_configs={}):
 
 
 # --- Functions for Agent Tracking ---
+# (Rest of the functions remain the same as previous version)
 def update_agent_heartbeat(db_path, agent_id, cluster_name, timestamp_iso, agent_version=None, metadata=None):
     conn = _get_db_connection(db_path)
     if conn is None:
@@ -269,8 +271,8 @@ def record_incident(db_path, pod_key, severity, summary, initial_reasons, k8s_co
                     root_cause, troubleshooting_steps
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (timestamp_str, pod_key, severity, summary, initial_reasons,
-                  k8s_context, sample_logs, input_prompt, raw_ai_response,
-                  root_cause, troubleshooting_steps))
+                    k8s_context, sample_logs, input_prompt, raw_ai_response,
+                    root_cause, troubleshooting_steps))
 
             if severity in alert_severity_levels:
                 today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -358,7 +360,7 @@ def set_pod_cooldown(db_path, pod_key, cooldown_minutes):
             cursor = conn.cursor()
             # Semicolon removed
             cursor.execute("INSERT OR REPLACE INTO alert_cooldown (pod_key, cooldown_until) VALUES (?, ?)",
-                           (pod_key, cooldown_until_iso))
+                            (pod_key, cooldown_until_iso))
             logging.info(f"[DB Manager] Set cooldown for pod {pod_key} until {cooldown_until_iso} ({cooldown_minutes} minutes)")
     except sqlite3.Error as e: logging.error(f"[DB Manager] Database error setting cooldown for {pod_key}: {e}")
     except Exception as e: logging.error(f"[DB Manager] Unexpected error setting cooldown for {pod_key}: {e}", exc_info=True)
@@ -378,13 +380,14 @@ def update_available_namespaces_in_db(db_path, namespaces):
                 # Semicolon removed
                 cursor.execute(f"DELETE FROM available_namespaces WHERE name NOT IN ({placeholders})", tuple(namespaces))
             else:
-                 # Semicolon removed
+                    # Semicolon removed
                 cursor.execute("DELETE FROM available_namespaces")
             for ns in namespaces:
-                 # Semicolon removed
+                    # Semicolon removed
                 cursor.execute("INSERT OR REPLACE INTO available_namespaces (name, last_seen) VALUES (?, ?)", (ns, timestamp))
             logging.info(f"[DB Manager] Updated available_namespaces table in DB with {len(namespaces)} namespaces.")
     except sqlite3.Error as e: logging.error(f"[DB Manager] Database error updating available namespaces: {e}")
     except Exception as e: logging.error(f"[DB Manager] Unexpected error updating available namespaces: {e}", exc_info=True)
     finally:
         if conn: conn.close()
+

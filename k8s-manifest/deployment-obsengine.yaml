@@ -15,11 +15,11 @@ spec:
       labels:
         app: obs-engine
     spec:
+      serviceAccountName: obs-engine-sa
       volumes:
         - name: obsengine-data
           persistentVolumeClaim:
             claimName: obs-engine-data-pvc
-
       containers:
         - name: obsengine-server
           image: codebuild.alfinac.com:4444/library/obsengine:v1.0.7 # Updated image

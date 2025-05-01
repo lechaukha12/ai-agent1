@@ -7,6 +7,7 @@
  */
 export async function fetchStats(days = 1) {
     try {
+        // Calls the BE API, which in turn calls the ObsEngine API
         const response = await fetch(`/api/stats?days=${days}`);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -18,7 +19,6 @@ export async function fetchStats(days = 1) {
         return stats;
     } catch (error) {
         console.error('Error fetching stats:', error);
-        // Re-throw the error so the caller can handle UI updates
         throw error;
     }
 }
@@ -34,6 +34,7 @@ export async function fetchStats(days = 1) {
  */
 export async function fetchIncidents(page = 1, podFilter = '', severityFilter = '', startDate = null, endDate = null) {
     try {
+        // Calls the BE API, which calls the ObsEngine API
         let url = `/api/incidents?limit=20&page=${page}&pod=${encodeURIComponent(podFilter)}&severity=${encodeURIComponent(severityFilter)}`;
         if (startDate) {
             url += `&start_date=${startDate}`;
@@ -48,14 +49,14 @@ export async function fetchIncidents(page = 1, podFilter = '', severityFilter = 
             try {
                 const errorData = await response.json();
                 errorMsg = errorData.error || errorMsg;
-            } catch (e) { /* Ignore if response is not JSON */ }
+            } catch (e) { /* Ignore */ }
             throw new Error(errorMsg);
         }
         const data = await response.json();
         if (data.error) {
             throw new Error(`API Error: ${data.error}`);
         }
-        return data; // { incidents: [], pagination: {} }
+        return data;
     } catch (error) {
         console.error('Lỗi fetch incidents:', error);
         throw error;
@@ -68,11 +69,12 @@ export async function fetchIncidents(page = 1, podFilter = '', severityFilter = 
  */
 export async function fetchAvailableNamespaces() {
     try {
+        // Calls the BE API, which calls the ObsEngine API
         const response = await fetch('/api/namespaces');
         if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
         const data = await response.json();
         if (data.error) { throw new Error(`API Error: ${data.error}`); }
-        return data; // Array of namespace strings
+        return Array.isArray(data) ? data : []; // Ensure it returns an array
     } catch (error) {
         console.error('Lỗi khi lấy danh sách namespace có sẵn:', error);
         throw error;
@@ -85,11 +87,25 @@ export async function fetchAvailableNamespaces() {
  */
 export async function fetchMonitoredNamespaces() {
      try {
+        // Calls the BE API, which calls the ObsEngine API
         const response = await fetch('/api/config/monitored_namespaces');
         if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
          const data = await response.json();
          if (data.error) { throw new Error(`API Error: ${data.error}`); }
-         return Array.isArray(data) ? data : [];
+         // Ensure data is an array, handle potential stringified JSON from older versions if necessary
+         let monitored = [];
+         if (Array.isArray(data)) {
+             monitored = data;
+         } else if (typeof data === 'string') {
+             try {
+                 monitored = JSON.parse(data);
+                 if (!Array.isArray(monitored)) monitored = [];
+             } catch (e) {
+                 console.warn("Could not parse monitored_namespaces string as JSON:", data);
+                 monitored = [];
+             }
+         }
+         return monitored;
     } catch (error) {
         console.error('Lỗi khi lấy danh sách namespace đang giám sát:', error);
         throw error;
@@ -103,6 +119,7 @@ export async function fetchMonitoredNamespaces() {
  */
 export async function saveMonitoredNamespacesApi(selectedNamespaces) {
     try {
+        // Calls the BE API, which calls the ObsEngine API
         const response = await fetch('/api/config/monitored_namespaces', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -126,16 +143,18 @@ export async function saveMonitoredNamespacesApi(selectedNamespaces) {
  */
 export async function fetchGeneralConfigApi() {
     try {
+        // Calls the BE API, which calls the ObsEngine API
         const response = await fetch('/api/config/general');
         if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
         const config = await response.json();
         if (config.error) { throw new Error(`API Error: ${config.error}`); }
-        // Provide defaults if keys are missing from backend response
+        // Defaults might be handled by BE/ObsEngine now, but keep client-side defaults as fallback
         config.scan_interval_seconds = config.scan_interval_seconds || 30;
         config.restart_count_threshold = config.restart_count_threshold || 5;
         config.loki_scan_min_level = config.loki_scan_min_level || 'INFO';
         config.alert_cooldown_minutes = config.alert_cooldown_minutes || 30;
-        config.alert_severity_levels = config.alert_severity_levels || 'WARNING,ERROR,CRITICAL';
+        // Use the string version if available, otherwise fallback
+        config.alert_severity_levels = config.alert_severity_levels_str || config.alert_severity_levels || 'WARNING,ERROR,CRITICAL';
         return config;
     } catch (error) {
         console.error('Lỗi khi lấy cấu hình chung qua API:', error);
@@ -150,6 +169,7 @@ export async function fetchGeneralConfigApi() {
  */
 export async function saveGeneralConfigApi(configData) {
     try {
+        // Calls the BE API, which calls the ObsEngine API
         const response = await fetch('/api/config/general', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -167,15 +187,18 @@ export async function saveGeneralConfigApi(configData) {
 
 /**
  * Fetches the Telegram configuration (Chat ID and token existence).
- * @returns {Promise<object>} - A promise that resolves with the config object { telegram_chat_id: string, has_token: boolean } or rejects with an error.
+ * @returns {Promise<object>} - A promise that resolves with the config object { telegram_chat_id: string, has_token: boolean, enable_telegram_alerts: boolean } or rejects with an error.
  */
 export async function fetchTelegramConfigApi() {
     try {
+        // Calls the BE API, which calls the ObsEngine API
         const response = await fetch('/api/config/telegram');
         if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
         const config = await response.json();
         if (config.error) { throw new Error(`API Error: ${config.error}`); }
-        return config; // { telegram_chat_id: '...', has_token: true/false }
+        // Ensure boolean value for toggle
+        config.enable_telegram_alerts = config.enable_telegram_alerts === true;
+        return config;
     } catch (error) {
         console.error('Lỗi khi lấy cấu hình Telegram qua API:', error);
         throw error;
@@ -184,11 +207,12 @@ export async function fetchTelegramConfigApi() {
 
 /**
  * Saves the Telegram configuration.
- * @param {object} configData - Object containing { telegram_bot_token: string|null, telegram_chat_id: string }. Token can be null/empty if not changing.
+ * @param {object} configData - Object containing { telegram_bot_token: string|null, telegram_chat_id: string, enable_telegram_alerts: boolean }. Token can be null/empty if not changing.
  * @returns {Promise<object>} - A promise that resolves with the success message or rejects with an error.
  */
 export async function saveTelegramConfigApi(configData) {
     try {
+        // Calls the BE API, which calls the ObsEngine API
         const response = await fetch('/api/config/telegram', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -210,12 +234,13 @@ export async function saveTelegramConfigApi(configData) {
  */
 export async function fetchAiConfigApi() {
      try {
+        // Calls the BE API, which calls the ObsEngine API
          const response = await fetch('/api/config/ai');
          if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
          const config = await response.json();
          if (config.error) { throw new Error(`API Error: ${config.error}`); }
-         // Provide defaults
-         config.enable_ai_analysis = config.enable_ai_analysis || false;
+         // Ensure boolean value for toggle
+         config.enable_ai_analysis = config.enable_ai_analysis === true;
          config.ai_provider = config.ai_provider || 'none';
          config.ai_model_identifier = config.ai_model_identifier || '';
          return config;
@@ -232,6 +257,7 @@ export async function fetchAiConfigApi() {
  */
 export async function saveAiConfigApi(configData) {
     try {
+        // Calls the BE API, which calls the ObsEngine API
         const response = await fetch('/api/config/ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -246,3 +272,27 @@ export async function saveAiConfigApi(configData) {
         throw error;
     }
 }
+
+// --- ADDED: Function to fetch Agent Status ---
+/**
+ * Fetches the status of active agents.
+ * @returns {Promise<object>} - A promise that resolves with { active_agents: [] } or rejects with an error.
+ */
+export async function fetchAgentStatus() {
+    try {
+        // Calls the BE API, which calls the ObsEngine API
+        const response = await fetch('/api/agents/status');
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        if (data.error) {
+            throw new Error(`API Error: ${data.error}`);
+        }
+        return data; // Expected format: { active_agents: [...] }
+    } catch (error) {
+        console.error('Error fetching agent status:', error);
+        throw error;
+    }
+}
+// --------------------------------------------

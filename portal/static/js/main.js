@@ -1,5 +1,4 @@
 // portal/static/js/main.js
-// Added console.log statements for debugging modal issues
 import * as api from './api.js';
 import * as ui from './ui.js';
 import * as charts from './charts.js';
@@ -13,7 +12,7 @@ let currentSeverityFilter = '';
 let currentStatsDays = 1;
 let currentIncidentStartDate = null;
 let currentIncidentEndDate = null;
-let incidentsDataCache = {}; // Cache for modal data
+let incidentsDataCache = {};
 
 // === DOM Element Selectors ===
 // Charts
@@ -54,12 +53,15 @@ const enableAiToggle = document.getElementById('enable-ai-toggle');
 const sidebarItems = document.querySelectorAll('.sidebar-item');
 const modalCloseButton = document.getElementById('modal-close-button');
 const modalOverlay = document.querySelector('.modal-overlay');
+// Agent Status Elements
+const agentStatusTableBody = document.getElementById('agent-status-table-body');
+const agentStatusErrorElem = document.getElementById('agent-status-error');
 
 
 // === Data Loading and Rendering Logic ===
 
 function loadActiveSectionData(activeSectionId) {
-    console.log(`DEBUG: Loading data for section: ${activeSectionId}`); // DEBUG
+    console.log(`DEBUG: Loading data for section: ${activeSectionId}`);
     switch (activeSectionId) {
         case 'dashboard': loadDashboardData(); break;
         case 'incidents': loadIncidentsData(true); break;
@@ -67,8 +69,60 @@ function loadActiveSectionData(activeSectionId) {
     }
 }
 
+// --- Function to load and render agent status ---
+async function loadAgentStatus() {
+    if (!agentStatusTableBody || !agentStatusErrorElem) return;
+
+    agentStatusTableBody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-gray-500 dark:text-gray-400">Đang tải trạng thái agent...</td></tr>`;
+    agentStatusErrorElem.classList.add('hidden');
+
+    try {
+        const data = await api.fetchAgentStatus();
+        const agents = data.active_agents || [];
+
+        agentStatusTableBody.innerHTML = '';
+
+        if (agents.length === 0) {
+            agentStatusTableBody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-gray-500 dark:text-gray-400">Không có agent nào đang hoạt động.</td></tr>`;
+            return;
+        }
+
+        agents.forEach(agent => {
+            const row = document.createElement('tr');
+
+            const createCell = (content, isHtml = false) => {
+                const cell = document.createElement('td');
+                cell.className = 'px-4 py-3 text-sm text-gray-700 dark:text-gray-300 align-middle';
+                ui.setText(cell, content, isHtml);
+                return cell;
+            };
+
+            row.appendChild(createCell(`${agent.agent_id || 'N/A'} / ${agent.cluster_name || 'N/A'}`));
+            row.appendChild(createCell(`<span class="severity-badge severity-info">Active</span>`, true));
+            row.appendChild(createCell(ui.formatVietnameseDateTime(agent.last_seen_timestamp)));
+            row.appendChild(createCell(agent.agent_version || 'N/A'));
+
+            agentStatusTableBody.appendChild(row);
+        });
+
+    } catch (error) {
+        console.error("DEBUG: Failed to load agent status:", error);
+        agentStatusTableBody.innerHTML = '';
+        agentStatusErrorElem.classList.remove('hidden');
+        agentStatusErrorElem.textContent = `Lỗi tải trạng thái agent: ${error.message}`;
+    }
+}
+
 async function loadDashboardData() {
     ui.showLoading();
+    if(lineChartErrorElem) lineChartErrorElem.classList.add('hidden');
+    if(topPodsErrorElem) topPodsErrorElem.classList.add('hidden');
+    if(namespacePieErrorElem) namespacePieErrorElem.classList.add('hidden');
+    if(severityPieErrorElem) severityPieErrorElem.classList.add('hidden');
+
+    // Call loadAgentStatus when dashboard loads
+    loadAgentStatus();
+
     try {
         const statsData = await api.fetchStats(currentStatsDays);
         ui.setText(totalIncidentsElem, statsData.totals?.incidents ?? '0');
@@ -98,6 +152,11 @@ async function loadDashboardData() {
         charts.renderTopPodsBarChart(topPodsCtx, topPodsErrorElem, topPodsNoDataElem, {});
         charts.renderNamespacePieChart(namespacePieCtx, namespacePieErrorElem, namespacePieNoDataElem, {});
         charts.clearSeverityPieChart(severityPieNoDataElem, "Lỗi tải dữ liệu.");
+        if(lineChartErrorElem) lineChartErrorElem.classList.remove('hidden');
+        if(topPodsErrorElem) topPodsErrorElem.classList.remove('hidden');
+        if(namespacePieErrorElem) namespacePieErrorElem.classList.remove('hidden');
+        if(severityPieErrorElem) severityPieErrorElem.classList.remove('hidden');
+
     } finally {
         ui.hideLoading();
     }
@@ -106,13 +165,13 @@ async function loadDashboardData() {
 async function loadIncidentsData(forceReload = false) {
     const tableBodyContent = incidentsTableBody?.innerHTML.trim() || '';
     if (!forceReload && tableBodyContent && !tableBodyContent.includes('Đang tải dữ liệu') && !tableBodyContent.includes('Không tìm thấy')) {
-        console.log("DEBUG: Incidents table already populated, skipping fetch."); // DEBUG
+        console.log("DEBUG: Incidents table already populated, skipping fetch.");
         return;
     }
     ui.showLoading();
     if (incidentsTableBody) incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-500">Đang tải dữ liệu...</td></tr>`;
     if (paginationControls) paginationControls.classList.add('hidden');
-    incidentsDataCache = {}; // Clear cache
+    incidentsDataCache = {};
 
     try {
         const data = await api.fetchIncidents(currentIncidentPage, currentPodFilter, currentSeverityFilter, currentIncidentStartDate, currentIncidentEndDate);
@@ -125,41 +184,38 @@ async function loadIncidentsData(forceReload = false) {
             if (incidents.length === 0) {
                 incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-500">Không tìm thấy sự cố nào khớp.</td></tr>`;
             } else {
-                console.log(`DEBUG: Rendering ${incidents.length} incidents.`); // DEBUG
+                console.log(`DEBUG: Rendering ${incidents.length} incidents.`);
                 incidents.forEach(incident => {
-                    incidentsDataCache[incident.id] = incident; // Cache data
+                    incidentsDataCache[incident.id] = incident;
                     const row = document.createElement('tr');
                     row.setAttribute('data-incident-id', incident.id);
-                    row.classList.add('cursor-pointer', 'hover:bg-gray-100');
+                    row.classList.add('cursor-pointer', 'hover:bg-gray-100', 'dark:hover:bg-gray-700');
 
-                    // --- DEBUG: Add click listener ---
                     row.addEventListener('click', (event) => {
-                        const clickedRow = event.currentTarget; // Get the row that was clicked
+                        const clickedRow = event.currentTarget;
                         const incidentId = clickedRow.getAttribute('data-incident-id');
-                        console.log(`DEBUG: Row clicked! Incident ID: ${incidentId}`); // DEBUG
+                        console.log(`DEBUG: Row clicked! Incident ID: ${incidentId}`);
                         if (!incidentId) {
                             console.error("DEBUG: Clicked row is missing data-incident-id attribute!");
                             return;
                         }
                         const incidentData = incidentsDataCache[incidentId];
-                        console.log("DEBUG: Incident data from cache:", incidentData); // DEBUG
+                        console.log("DEBUG: Incident data from cache:", incidentData);
                         if (incidentData) {
-                            ui.openModal(incidentData); // Call openModal from ui.js
+                            ui.openModal(incidentData);
                         } else {
                             console.error(`DEBUG: Incident data for ID ${incidentId} not found in cache! Cache content:`, incidentsDataCache);
                         }
                     });
-                    // --- End DEBUG ---
-
 
                     const severityUpper = incident.severity ? incident.severity.toUpperCase() : '';
-                    if (severityUpper === 'CRITICAL') row.classList.add('bg-red-50');
-                    else if (severityUpper === 'ERROR') row.classList.add('bg-orange-50');
-                    else if (severityUpper === 'WARNING') row.classList.add('bg-yellow-50');
+                    if (severityUpper === 'CRITICAL') row.classList.add('bg-red-50', 'dark:bg-red-900/20');
+                    else if (severityUpper === 'ERROR') row.classList.add('bg-orange-50', 'dark:bg-orange-900/20');
+                    else if (severityUpper === 'WARNING') row.classList.add('bg-yellow-50', 'dark:bg-yellow-900/20');
 
                     const createCell = (content, isHtml = false, allowWrap = false) => {
                         const cell = document.createElement('td');
-                        cell.className = 'px-4 py-3 text-sm text-gray-700 align-top';
+                        cell.className = 'px-4 py-3 text-sm text-gray-700 dark:text-gray-300 align-top';
                         ui.setText(cell, content, isHtml);
                         cell.title = cell.textContent;
                         cell.classList.toggle('whitespace-normal', allowWrap);
@@ -207,15 +263,12 @@ function loadAllSettings() {
 
 // === Event Listener Setup ===
 document.addEventListener('DOMContentLoaded', () => {
-    // Set Initial Date Range
     const today = new Date();
     currentIncidentStartDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0, 0)).toISOString();
     currentIncidentEndDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 23, 59, 59, 999)).toISOString();
 
-    // Activate Initial Section
     ui.setActiveSection('dashboard', loadActiveSectionData);
 
-    // Sidebar Navigation
     sidebarItems.forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
@@ -224,7 +277,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Incident Filtering & Refresh
     if (filterButton) filterButton.addEventListener('click', () => {
         currentPodFilter = podFilterInput?.value || '';
         currentSeverityFilter = severityFilterSelect?.value || '';
@@ -234,7 +286,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (podFilterInput) podFilterInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') filterButton?.click(); });
     if (refreshIncidentsButton) refreshIncidentsButton.addEventListener('click', () => { loadIncidentsData(true); });
 
-    // Pagination
     if (prevPageButton) prevPageButton.addEventListener('click', () => {
         if (currentIncidentPage > 1) { currentIncidentPage--; loadIncidentsData(true); }
     });
@@ -242,7 +293,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentIncidentPage < totalIncidentPages) { currentIncidentPage++; loadIncidentsData(true); }
     });
 
-    // Dashboard Time Range
     timeRangeButtons.forEach(button => {
         button.addEventListener('click', () => {
             const days = parseInt(button.getAttribute('data-days'));
@@ -261,31 +311,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
             timeRangeButtons.forEach(btn => {
                  btn.classList.remove('bg-blue-500', 'text-white');
-                 btn.classList.add('bg-gray-300', 'text-gray-700');
+                 btn.classList.add('bg-gray-300', 'dark:bg-gray-600', 'text-gray-700', 'dark:text-gray-200');
                  btn.disabled = false;
             });
             button.classList.add('bg-blue-500', 'text-white');
-            button.classList.remove('bg-gray-300', 'text-gray-700');
+            button.classList.remove('bg-gray-300', 'dark:bg-gray-600', 'text-gray-700', 'dark:text-gray-200');
             button.disabled = true;
         });
          if (button.getAttribute('data-days') === '1') button.click();
          else button.disabled = false;
     });
 
-    // Settings Save Buttons
     if (saveNsConfigButton) saveNsConfigButton.addEventListener('click', settings.saveMonitoredNamespaces);
     if (saveGeneralConfigButton) saveGeneralConfigButton.addEventListener('click', settings.saveGeneralSettings);
     if (saveTelegramConfigButton) saveTelegramConfigButton.addEventListener('click', settings.saveTelegramSettings);
     if (saveAiConfigButton) saveAiConfigButton.addEventListener('click', settings.saveAiSettings);
 
-    // AI Toggle Change Listener
     if (enableAiToggle) enableAiToggle.addEventListener('change', settings.handleAiToggleChange);
 
-    // Modal Close Listeners
     if (modalCloseButton) modalCloseButton.addEventListener('click', ui.closeModal);
     if (modalOverlay) modalOverlay.addEventListener('click', (event) => { if (event.target === modalOverlay) ui.closeModal(); });
     document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && document.getElementById('incident-modal')?.classList.contains('modal-visible')) ui.closeModal(); });
 
-    console.log("DEBUG: main.js loaded and event listeners attached."); // DEBUG
+    console.log("DEBUG: main.js loaded and event listeners attached.");
 
 }); // End DOMContentLoaded

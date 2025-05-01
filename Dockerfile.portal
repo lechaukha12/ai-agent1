@@ -1,34 +1,11 @@
-# Sử dụng base image Python slim
-FROM python:3.10-slim
-
-# Thiết lập thư mục làm việc
-WORKDIR /portal
-
-# Cài đặt các gói cần thiết cho timezone data
-RUN apt-get update && apt-get install -y --no-install-recommends tzdata && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# Sao chép file requirements của portal
+FROM python:3.11-slim
+WORKDIR /app
 COPY portal/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Cài đặt thư viện Python cho portal
-RUN pip install --no-cache-dir --prefer-binary -r requirements.txt
+COPY portal/ /app/
 
-# Sao chép code ứng dụng Flask và templates của portal
-COPY ./portal /portal
-
-# Tạo thư mục /data để mount PV (dù chỉ đọc) và cấp quyền
-# Cần root để tạo thư mục gốc và chown
-USER root
-RUN mkdir /data && chown 1001:1001 /data
-USER 1001 # Chuyển lại user 1001
-
-# Mở port Flask
 EXPOSE 5000
 
-# Chạy bằng Gunicorn (cần thêm gunicorn vào requirements.txt nếu dùng)
-# CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "app:app"]
 
-# Hoặc chạy trực tiếp Flask (đơn giản hơn)
-CMD ["python", "app.py"]

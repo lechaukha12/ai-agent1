@@ -1,33 +1,28 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: k8s-log-agent-sa # Đổi tên Service Account
-  namespace: kube-observability # Đổi namespace của agent
+  name: obs-engine-sa
+  namespace: kube-observability # Đảm bảo đúng namespace
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: k8s-log-agent-reader # Giữ tên cũ hoặc đổi nếu muốn
+  # Tên ClusterRole nên rõ ràng về quyền hạn
+  name: obs-engine-namespace-reader
 rules:
 - apiGroups: [""] # Core API group
-  # Thêm "namespaces" vào resources
-  resources: ["pods", "nodes", "events", "namespaces"] # <<< Đã thêm namespaces
-  # Giữ nguyên verbs chỉ đọc
-  verbs: ["get", "list", "watch"]
-- apiGroups: ["metrics.k8s.io"]
-  resources: ["pods", "nodes"]
-  verbs: ["get", "list"]
+  resources: ["namespaces"]
+  verbs: ["get", "list"] # Chỉ cần quyền đọc
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: k8s-log-agent-reader-binding
+  name: obs-engine-read-namespaces
 subjects:
 - kind: ServiceAccount
-  name: k8s-log-agent-sa
-  namespace: kube-observability
+  name: obs-engine-sa          # Tên ServiceAccount đã tạo
+  namespace: kube-observability # Namespace của ServiceAccount
 roleRef:
   kind: ClusterRole
-  name: k8s-log-agent-reader
+  name: obs-engine-namespace-reader # Tên ClusterRole đã tạo
   apiGroup: rbac.authorization.k8s.io
-    

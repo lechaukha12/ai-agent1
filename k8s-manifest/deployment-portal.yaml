@@ -1,67 +1,79 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: k8s-log-agent-portal # Tên Deployment cho portal
-  namespace: kube-observability # Cùng namespace với agent và PVC
+  name: obs-engine-be
+  namespace: kube-observability
   labels:
-    app: k8s-log-agent-portal
+    app: obs-engine-be
 spec:
-  replicas: 1 # Chạy 1 bản sao portal
+  replicas: 1
   selector:
     matchLabels:
-      app: k8s-log-agent-portal
+      app: obs-engine-be
   template:
     metadata:
       labels:
-        app: k8s-log-agent-portal
+        app: obs-engine-be
     spec:
-      # Không cần ServiceAccount riêng vì chỉ đọc PV
+      volumes:
+      - name: obsengine-be-auth-data
+        persistentVolumeClaim:
+          claimName: obs-engine-be-auth-data-pvc # Trỏ đến PVC mới cho Auth DB
+
       containers:
-      - name: portal
-        # !!! THAY THẾ BẰNG TÊN IMAGE PORTAL CỦA BẠN !!!
-        image: codebuild.alfinac.com:4444/library/ai-agent1-portal:v1.0.5
+      - name: obs-engine-be-server
+        image: codebuild.alfinac.com:4444/library/obsengine-be:v1.0.7
         imagePullPolicy: Always
         ports:
-        - containerPort: 5000 # Port Flask chạy
+        - containerPort: 5000
         env:
-        # Truyền đường dẫn DB và múi giờ vào portal
-        - name: DB_PATH
-          value: "/data/agent_stats.db" # Giống agent
         - name: TZ
-          value: Asia/Ho_Chi_Minh # Để log của portal đúng giờ
+          value: Asia/Ho_Chi_Minh
+        - name: OBS_ENGINE_API_URL # URL của ObsEngine API
+          value: "http://obs-engine-service.kube-observability.svc.cluster.local:8080"
+        - name: BE_DB_PATH # Đường dẫn DB User trên Volume mới
+          value: "/auth-data/be_users.db"
+        # - name: FLASK_SECRET_KEY # Có thể cần cho session/flash messages
+        #   valueFrom:
+        #     secretKeyRef:
+        #       name: obs-engine-be-secret # Tạo Secret riêng nếu cần
+        #       key: flask-secret-key
         volumeMounts:
-        - name: agent-data # Tên volume mount phải khớp tên volume
-          mountPath: /data   # Mount cùng thư mục /data
-          # readOnly: true # Lý tưởng là true nếu StorageClass/accessMode hỗ trợ
-                          # Tạm thời để false (mặc định) cho đơn giản
-        resources: # Portal thường nhẹ hơn agent
+        - name: obsengine-be-auth-data # Mount Volume mới
+          mountPath: /auth-data        # Vào thư mục /auth-data
+        resources:
           requests:
             cpu: "50m"
             memory: "128Mi"
           limits:
             cpu: "200m"
             memory: "256Mi"
-      # Mount cùng PVC với agent
-      volumes:
-      - name: agent-data # Tên volume
-        persistentVolumeClaim:
-          claimName: k8s-log-agent-data-pvc # Dùng chung PVC
+
+      securityContext:
+        runAsUser: 1004
+        runAsNonRoot: true
+        fsGroup: 1004 # Cần để ghi vào /auth-data
+
+      schedulerName: default-scheduler
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: k8s-log-agent-portal-svc # Tên Service cho portal
+  name: obs-engine-be-svc
   namespace: kube-observability
   labels:
-    app: k8s-log-agent-portal
+    app: obs-engine-be
 spec:
   selector:
-    app: k8s-log-agent-portal # Chọn các pod của portal deployment
+    app: obs-engine-be
   ports:
     - protocol: TCP
-      port: 80 # Port của Service (có thể truy cập nội bộ)
-      targetPort: 5000 # Port mà container Flask đang chạy
-  # Type: ClusterIP là mặc định, chỉ truy cập được bên trong cluster
-  # Đổi thành NodePort hoặc LoadBalancer nếu muốn truy cập từ bên ngoài
-  # type: ClusterIP
-  # Hoặc type: NodePort
+      port: 80
+      targetPort: 5000

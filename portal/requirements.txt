@@ -1,4 +1,5 @@
 Flask
 Flask-Login
 Flask-Bcrypt
-gunicorn # Nên dùng cho production
+gunicorn
+requests # Thêm thư viện này

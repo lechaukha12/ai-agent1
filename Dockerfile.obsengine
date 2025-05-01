@@ -1,11 +1,21 @@
 FROM python:3.11-slim
 WORKDIR /app
+
+# Copy requirements first from the obsengine directory in the build context
 COPY obsengine/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy the entire obsengine directory content into /app/obsengine in the container
 COPY obsengine/ /app/obsengine/
+
+# Set PYTHONPATH to include the main /app directory AND the /app/obsengine directory
 ENV PYTHONPATH=/app:/app/obsengine
 
 EXPOSE 8080
+
+# Use ENTRYPOINT to ensure Gunicorn is called
 ENTRYPOINT ["gunicorn"]
+
+# CMD provides default arguments to ENTRYPOINT
+# Use the package structure for the application path: obsengine.app:app
 CMD ["--bind", "0.0.0.0:8080", "--workers", "4", "obsengine.app:app"]

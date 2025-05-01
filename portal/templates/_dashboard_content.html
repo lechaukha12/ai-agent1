@@ -73,4 +73,24 @@
              <p id="line-chart-no-data" class="text-center text-gray-500 dark:text-gray-400 hidden mt-4">Chưa có đủ dữ liệu thống kê hàng ngày để vẽ biểu đồ đường.</p>
         </div>
     </div>
-</section>
+
+    <div class="bg-white dark:bg-gray-800 p-4 md:p-6 rounded-lg shadow border border-gray-200 dark:border-gray-700">
+        <h3 class="text-lg font-semibold mb-4 text-gray-700 dark:text-gray-200">Trạng thái Agent</h3>
+        <div class="overflow-x-auto">
+            <table id="agent-status-table" class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead class="bg-gray-50 dark:bg-gray-700">
+                    <tr>
+                        <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Agent ID / Cluster</th>
+                        <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Trạng thái</th>
+                        <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Lần cuối thấy</th>
+                        <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Phiên bản</th>
+                    </tr>
+                </thead>
+                <tbody id="agent-status-table-body" class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                    <tr><td colspan="4" class="text-center py-6 text-gray-500 dark:text-gray-400">Đang tải trạng thái agent...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p id="agent-status-error" class="text-center text-red-500 hidden mt-4">Lỗi tải trạng thái agent.</p>
+    </div>
+    </section>
