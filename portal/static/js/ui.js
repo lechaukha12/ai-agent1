@@ -1,5 +1,4 @@
 // portal/static/js/ui.js
-// Added console.log statements for debugging modal issues
 
 // --- DOM Element Selectors ---
 const loadingSpinner = document.getElementById('loading-spinner');
@@ -8,7 +7,7 @@ const sidebarItems = document.querySelectorAll('.sidebar-item');
 const contentSections = document.querySelectorAll('.content-section');
 const incidentModal = document.getElementById('incident-modal');
 const modalOverlay = document.querySelector('.modal-overlay');
-// Modal Content Elements
+// Incident Modal Content Elements
 const modalTimestamp = document.getElementById('modal-timestamp');
 const modalPodKey = document.getElementById('modal-pod-key');
 const modalSeverity = document.getElementById('modal-severity');
@@ -20,11 +19,19 @@ const modalSampleLogs = document.getElementById('modal-sample-logs');
 const modalK8sContext = document.getElementById('modal-k8s-context');
 const modalInputPrompt = document.getElementById('modal-input-prompt');
 const modalRawAiResponse = document.getElementById('modal-raw-ai-response');
-// Status message elements
-export const saveGeneralConfigStatus = document.getElementById('save-general-config-status');
-export const saveTelegramConfigStatus = document.getElementById('save-telegram-config-status');
-export const saveNsConfigStatus = document.getElementById('save-ns-config-status');
-export const saveAiConfigStatus = document.getElementById('save-ai-config-status');
+// User Management Table
+const usersTableBody = document.getElementById('users-table-body');
+const usersListErrorElem = document.getElementById('users-list-error');
+// Edit User Modal Elements
+const editUserModal = document.getElementById('edit-user-modal');
+const editUserModalCloseButton = document.getElementById('edit-user-modal-close-button');
+const editUserForm = document.getElementById('edit-user-form');
+const editUserIdInput = document.getElementById('edit-user-id');
+const editUsernameInput = document.getElementById('edit-username');
+const editFullnameInput = document.getElementById('edit-fullname');
+const editRoleSelect = document.getElementById('edit-role');
+const editUserStatus = document.getElementById('edit-user-status');
+const saveUserChangesButton = document.getElementById('save-user-changes-button');
 
 
 // --- Utility Functions ---
@@ -48,11 +55,10 @@ export function formatVietnameseDateTime(isoString) {
              day: '2-digit', month: '2-digit', year: 'numeric',
              hour: '2-digit', minute: '2-digit', second: '2-digit',
              hour12: false,
-             // timeZone: 'Asia/Ho_Chi_Minh'
          };
          return dateObj.toLocaleString('vi-VN', options);
      } catch (e) {
-         console.error("DEBUG: Error formatting date:", isoString, e); // DEBUG
+         console.error("DEBUG: Error formatting date:", isoString, e);
          return 'Lỗi định dạng';
      }
 }
@@ -64,16 +70,16 @@ export function setText(element, text, isHtml = false) {
          if (isHtml) {
              element.innerHTML = content;
          } else {
-             element.textContent = (content === na_html) ? 'N/A' : text;
-             if (element.textContent === 'N/A' && content === na_html) {
-                 element.innerHTML = content;
+             // Handle case where text might be 'N/A' but we want the italicized version
+             if (content === na_html) {
+                 element.innerHTML = na_html;
+             } else {
+                 element.textContent = text; // Set text content directly
              }
          }
-    } else {
-        // DEBUG: Log if an element is unexpectedly null
-        // console.warn("DEBUG: setText called with null element for text:", text);
     }
 }
+
 
 export function getSeverityClass(severity) {
     const s = severity ? severity.toLowerCase() : 'unknown';
@@ -86,7 +92,9 @@ export function getSeverityClass(severity) {
 
 export function createSeverityBadge(severity) {
     const badgeClass = getSeverityClass(severity);
-    return `<span class="severity-badge ${badgeClass}">${severity || 'UNKNOWN'}</span>`;
+    const safeSeverity = document.createElement('span');
+    safeSeverity.textContent = severity || 'UNKNOWN';
+    return `<span class="severity-badge ${badgeClass}">${safeSeverity.innerHTML}</span>`;
 }
 
 export function showStatusMessage(statusElement, message, type = 'info') {
@@ -102,21 +110,22 @@ export function showStatusMessage(statusElement, message, type = 'info') {
 
 export function hideStatusMessage(statusElement, delay = 3000) {
     if (!statusElement) return;
-    setTimeout(() => { statusElement.classList.add('hidden'); }, delay);
+    setTimeout(() => {
+        statusElement.classList.add('hidden');
+        statusElement.textContent = '';
+        }, delay);
 }
 
 
-// --- Modal Functions ---
+// --- Incident Modal Functions ---
 
 export function openModal(incidentData) {
-    console.log("DEBUG: ui.openModal called with data:", incidentData); // DEBUG
     if (!incidentData || !incidentModal) {
         console.error(`DEBUG: Incident data not provided or modal element missing.`);
         return;
     }
 
     try {
-        // Populate modal fields
         setText(modalTimestamp, formatVietnameseDateTime(incidentData.timestamp));
         setText(modalPodKey, incidentData.pod_key);
         setText(modalSeverity, createSeverityBadge(incidentData.severity), true);
@@ -127,9 +136,7 @@ export function openModal(incidentData) {
         setText(modalSampleLogs, incidentData.sample_logs);
         setText(modalK8sContext, incidentData.k8s_context);
 
-        // Conditionally show AI fields
         const aiEnabledForIncident = !!incidentData.input_prompt || !!incidentData.raw_ai_response;
-        console.log("DEBUG: AI fields enabled for this incident?", aiEnabledForIncident); // DEBUG
         const rootCauseSection = modalRootCause?.closest('.modal-section');
         const stepsSection = modalTroubleshootingSteps?.closest('.modal-section');
         const promptSection = modalInputPrompt?.closest('.modal-section');
@@ -143,22 +150,17 @@ export function openModal(incidentData) {
         setText(modalInputPrompt, incidentData.input_prompt);
         setText(modalRawAiResponse, incidentData.raw_ai_response);
 
-        // Show the modal
-        console.log("DEBUG: Attempting to add 'modal-visible' class"); // DEBUG
         incidentModal.classList.add('modal-visible');
         document.body.style.overflow = 'hidden';
-        console.log("DEBUG: 'modal-visible' class added, body overflow hidden."); // DEBUG
 
     } catch (error) {
-        console.error("DEBUG: Error occurred inside openModal:", error); // DEBUG
+        console.error("DEBUG: Error occurred inside openModal:", error);
     }
 }
 
 export function closeModal() {
-    console.log("DEBUG: closeModal called"); // DEBUG
     if (incidentModal) {
         incidentModal.classList.remove('modal-visible');
-        console.log("DEBUG: 'modal-visible' class removed."); // DEBUG
     }
     document.body.style.overflow = '';
 }
@@ -181,13 +183,145 @@ export function setActiveSection(targetId, loadSectionDataCallback) {
     }
 
     sidebarItems.forEach(item => {
-        const isActive = item.getAttribute('href') === '#' + targetId;
+        const href = item.getAttribute('href');
+        const isActive = href === '#' + targetId;
         item.classList.toggle('active', isActive);
+        item.classList.toggle('bg-blue-100', isActive);
+        item.classList.toggle('text-blue-700', isActive);
         item.classList.toggle('text-gray-700', !isActive);
         item.classList.toggle('hover:bg-gray-100', !isActive);
     });
 
+
     if (typeof loadSectionDataCallback === 'function') {
         loadSectionDataCallback(targetId);
     }
+}
+
+// --- User Management UI Functions ---
+
+/**
+ * Renders the list of users into the table.
+ * @param {Array<object>} users - Array of user objects from the API.
+ * @param {function} editUserCallback - Function to call when edit button is clicked.
+ */
+export function renderUserTable(users, editUserCallback) {
+    if (!usersTableBody) {
+        console.error("User table body element not found.");
+        return;
+    }
+    if (usersListErrorElem) usersListErrorElem.classList.add('hidden');
+
+    usersTableBody.innerHTML = '';
+
+    if (!users || users.length === 0) {
+        // Updated colspan to 4 to include the new Action column
+        usersTableBody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-gray-500">Không có người dùng nào.</td></tr>`;
+        return;
+    }
+
+    users.forEach(user => {
+        const row = document.createElement('tr');
+        row.setAttribute('data-user-id', user.id); // Store user ID on the row
+
+        // Username Cell
+        const userCell = document.createElement('td');
+        userCell.className = 'px-4 py-2 text-sm text-gray-900 font-medium';
+        setText(userCell, user.username);
+        row.appendChild(userCell);
+
+        // Full Name Cell
+        const nameCell = document.createElement('td');
+        nameCell.className = 'px-4 py-2 text-sm text-gray-600';
+        setText(nameCell, user.fullname); // Use setText helper
+        row.appendChild(nameCell);
+
+        // Role Cell
+        const roleCell = document.createElement('td');
+        roleCell.className = 'px-4 py-2 text-sm text-gray-600';
+        setText(roleCell, user.role);
+        row.appendChild(roleCell);
+
+        // Action Cell (New)
+        const actionCell = document.createElement('td');
+        actionCell.className = 'px-4 py-2 text-sm text-gray-600';
+        const editButton = document.createElement('button');
+        editButton.textContent = 'Sửa';
+        editButton.className = 'text-indigo-600 hover:text-indigo-900 hover:underline text-xs font-medium';
+        editButton.onclick = (event) => {
+            event.stopPropagation(); // Prevent row click event if any
+            if (typeof editUserCallback === 'function') {
+                editUserCallback(user); // Pass the full user object
+            }
+        };
+        actionCell.appendChild(editButton);
+        row.appendChild(actionCell);
+
+        usersTableBody.appendChild(row);
+    });
+}
+
+/**
+ * Shows an error message related to the user list.
+ * @param {string} message - The error message to display.
+ */
+export function showUserListError(message) {
+    if (usersTableBody) usersTableBody.innerHTML = '';
+    if (usersListErrorElem) {
+        usersListErrorElem.textContent = message;
+        usersListErrorElem.classList.remove('hidden');
+    }
+}
+
+/**
+ * Clears the "Create User" form fields.
+ */
+export function clearCreateUserForm() {
+    const form = document.getElementById('create-user-form');
+    if (form) {
+        form.reset();
+    }
+    const passwordError = document.getElementById('password-match-error');
+    if (passwordError) passwordError.classList.add('hidden');
+}
+
+// --- Edit User Modal Functions (New) ---
+
+/**
+ * Opens the Edit User modal and populates it with data.
+ * @param {object} userData - The user data object {id, username, fullname, role}.
+ */
+export function openEditUserModal(userData) {
+    if (!editUserModal || !editUserForm) return;
+    populateEditUserModal(userData);
+    editUserModal.classList.remove('hidden');
+    editUserModal.classList.add('flex'); // Use flex to center vertically
+    document.body.style.overflow = 'hidden'; // Prevent background scrolling
+}
+
+/**
+ * Closes the Edit User modal.
+ */
+export function closeEditUserModal() {
+    if (!editUserModal) return;
+    editUserModal.classList.add('hidden');
+    editUserModal.classList.remove('flex');
+    document.body.style.overflow = ''; // Restore background scrolling
+    // Clear status message when closing
+    if (editUserStatus) {
+        editUserStatus.classList.add('hidden');
+        editUserStatus.textContent = '';
+    }
+}
+
+/**
+ * Populates the Edit User modal form fields.
+ * @param {object} userData - The user data object.
+ */
+export function populateEditUserModal(userData) {
+    if (!editUserIdInput || !editUsernameInput || !editFullnameInput || !editRoleSelect) return;
+    editUserIdInput.value = userData.id || '';
+    editUsernameInput.value = userData.username || '';
+    editFullnameInput.value = userData.fullname || '';
+    editRoleSelect.value = userData.role || 'user';
 }

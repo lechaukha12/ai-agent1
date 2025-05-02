@@ -108,17 +108,18 @@ export async function fetchAgentStatus() {
  */
 export async function fetchTelegramConfigApi() {
     try {
-        const response = await fetch('/api/config/telegram'); // Assumes GET is handled correctly now
+        const response = await fetch('/api/config/telegram');
         if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
         const config = await response.json();
         if (config.error) { throw new Error(`API Error: ${config.error}`); }
-        config.enable_telegram_alerts = config.enable_telegram_alerts === true;
+        config.enable_telegram_alerts = config.enable_telegram_alerts === true || config.enable_telegram_alerts === 'true';
         return config;
     } catch (error) {
         console.error('Lỗi khi lấy cấu hình Telegram qua API:', error);
         throw error;
     }
 }
+
 
 /**
  * Saves the Telegram configuration.
@@ -148,11 +149,11 @@ export async function saveTelegramConfigApi(configData) {
  */
 export async function fetchAiConfigApi() {
      try {
-         const response = await fetch('/api/config/ai'); // Assumes GET is handled correctly now
+         const response = await fetch('/api/config/ai');
          if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
          const config = await response.json();
          if (config.error) { throw new Error(`API Error: ${config.error}`); }
-         config.enable_ai_analysis = config.enable_ai_analysis === true;
+         config.enable_ai_analysis = config.enable_ai_analysis === true || config.enable_ai_analysis === 'true';
          config.ai_provider = config.ai_provider || 'none';
          config.ai_model_identifier = config.ai_model_identifier || '';
          return config;
@@ -161,6 +162,7 @@ export async function fetchAiConfigApi() {
          throw error;
      }
 }
+
 
 /**
  * Saves the AI configuration.
@@ -185,7 +187,7 @@ export async function saveAiConfigApi(configData) {
 }
 
 
-// --- NEW Agent-Specific Config APIs ---
+// --- Agent-Specific Config APIs ---
 
 /**
  * Fetches the configuration for a specific agent.
@@ -194,7 +196,6 @@ export async function saveAiConfigApi(configData) {
  * @throws {Error} If the API call fails.
  */
 export async function fetchAgentConfig(agentId) {
-    // !! Backend endpoint needs to be created !!
     const endpoint = `/api/agents/${encodeURIComponent(agentId)}/config`;
     console.log(`Fetching config for agent: ${agentId}`); // DEBUG
     try {
@@ -206,17 +207,15 @@ export async function fetchAgentConfig(agentId) {
         if (config.error) {
             throw new Error(`API Error: ${config.error}`);
         }
-        // Provide default values if specific keys are missing from the response
         return {
             scan_interval_seconds: config.scan_interval_seconds ?? 30,
             restart_count_threshold: config.restart_count_threshold ?? 5,
             loki_scan_min_level: config.loki_scan_min_level ?? 'INFO',
             monitored_namespaces: Array.isArray(config.monitored_namespaces) ? config.monitored_namespaces : [],
-            // Add other agent-specific fields here as needed
         };
     } catch (error) {
         console.error(`Error fetching config for agent ${agentId}:`, error);
-        throw error; // Re-throw the error for the caller to handle
+        throw error;
     }
 }
 
@@ -228,7 +227,6 @@ export async function fetchAgentConfig(agentId) {
  * @throws {Error} If the API call fails.
  */
 export async function saveAgentGeneralConfig(agentId, configData) {
-    // !! Backend endpoint needs to be created !!
     const endpoint = `/api/agents/${encodeURIComponent(agentId)}/config/general`;
     console.log(`Saving general config for agent ${agentId}:`, configData); // DEBUG
     try {
@@ -245,7 +243,7 @@ export async function saveAgentGeneralConfig(agentId, configData) {
         return result;
     } catch (error) {
         console.error(`Error saving general config for agent ${agentId}:`, error);
-        throw error; // Re-throw the error
+        throw error;
     }
 }
 
@@ -257,14 +255,12 @@ export async function saveAgentGeneralConfig(agentId, configData) {
  * @throws {Error} If the API call fails.
  */
 export async function saveAgentMonitoredNamespaces(agentId, namespaces) {
-    // !! Backend endpoint needs to be created !!
     const endpoint = `/api/agents/${encodeURIComponent(agentId)}/config/namespaces`;
      console.log(`Saving namespaces for agent ${agentId}:`, namespaces); // DEBUG
     try {
         const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            // Ensure the payload matches what the backend expects, e.g., { namespaces: [...] }
             body: JSON.stringify({ namespaces: namespaces }),
         });
         const result = await response.json();
@@ -275,14 +271,89 @@ export async function saveAgentMonitoredNamespaces(agentId, namespaces) {
         return result;
     } catch (error) {
         console.error(`Error saving namespaces for agent ${agentId}:`, error);
-        throw error; // Re-throw the error
+        throw error;
     }
 }
 
-// --- Removed/Deprecated Global Config APIs ---
-/*
-export async function fetchGeneralConfigApi() { ... } // Removed
-export async function saveGeneralConfigApi(configData) { ... } // Removed
-export async function fetchMonitoredNamespaces() { ... } // Removed
-export async function saveMonitoredNamespacesApi(selectedNamespaces) { ... } // Removed
-*/
+// --- User Management APIs ---
+
+/**
+ * Fetches the list of all users.
+ * Requires admin privileges.
+ * @returns {Promise<Array<object>>} A promise that resolves with an array of user objects or rejects with an error.
+ */
+export async function fetchUsers() {
+    try {
+        const response = await fetch('/api/users');
+        if (!response.ok) {
+            if (response.status === 403) {
+                throw new Error("Bạn không có quyền xem danh sách người dùng.");
+            }
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const users = await response.json();
+        if (users.error) {
+            throw new Error(`API Error: ${users.error}`);
+        }
+        return Array.isArray(users) ? users : [];
+    } catch (error) {
+        console.error('Lỗi khi lấy danh sách user:', error);
+        throw error;
+    }
+}
+
+/**
+ * Creates a new user.
+ * Requires admin privileges.
+ * @param {object} userData - Object containing { username, password, fullname, role }.
+ * @returns {Promise<object>} A promise that resolves with the success message and new user data, or rejects with an error.
+ */
+export async function createUser(userData) {
+    // Sends JSON data
+    try {
+        const response = await fetch('/api/users', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json', // Send JSON
+            },
+            body: JSON.stringify(userData), // Stringify the user data object
+        });
+        const result = await response.json();
+        if (!response.ok || result.error) {
+            throw new Error(result.error || `HTTP error! status: ${response.status}`);
+        }
+        console.log("User created successfully via API:", result.user);
+        return result; // Contains { message: "...", user: {...} } on success
+    } catch (error) {
+        console.error('Lỗi khi tạo user:', error);
+        throw error;
+    }
+}
+
+/**
+ * Updates an existing user's information (fullname and role).
+ * Requires admin privileges.
+ * @param {number} userId - The ID of the user to update.
+ * @param {object} userData - Object containing { fullname, role }. Fields are optional.
+ * @returns {Promise<object>} A promise that resolves with the success message and updated user data, or rejects with an error.
+ */
+export async function updateUser(userId, userData) {
+    try {
+        const response = await fetch(`/api/users/${userId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(userData),
+        });
+        const result = await response.json();
+        if (!response.ok || result.error) {
+            throw new Error(result.error || `HTTP error! status: ${response.status}`);
+        }
+        console.log(`User ${userId} updated successfully via API:`, result.user);
+        return result; // Contains { message: "...", user: {...} } on success
+    } catch (error) {
+        console.error(`Lỗi khi cập nhật user ${userId}:`, error);
+        throw error;
+    }
+}

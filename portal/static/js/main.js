@@ -2,7 +2,7 @@
 import * as api from './api.js';
 import * as ui from './ui.js';
 import * as charts from './charts.js';
-import * as settings from './settings.js'; // Keep for global settings (Telegram, AI)
+import * as settings from './settings.js';
 
 // === State Variables ===
 let currentIncidentPage = 1;
@@ -12,11 +12,13 @@ let currentSeverityFilter = '';
 let currentStatsDays = 1;
 let currentIncidentStartDate = null;
 let currentIncidentEndDate = null;
-let incidentsDataCache = {};
-let currentConfiguringAgentId = null; // Track which agent is being configured
+let incidentsDataCache = {}; // Cache for incident details
+let usersDataCache = {}; // Cache for user details (for editing)
+let currentConfiguringAgentId = null;
+let currentUserRole = 'user';
 
 // === DOM Element Selectors ===
-// Charts (Keep as is)
+// Charts
 const lineChartCtx = document.getElementById('statsChart')?.getContext('2d');
 const lineChartErrorElem = document.getElementById('line-chart-error');
 const lineChartNoDataElem = document.getElementById('line-chart-no-data');
@@ -29,7 +31,7 @@ const namespacePieNoDataElem = document.getElementById('namespace-pie-no-data');
 const severityPieCtx = document.getElementById('severityPieChart')?.getContext('2d');
 const severityPieErrorElem = document.getElementById('severity-pie-error');
 const severityPieNoDataElem = document.getElementById('severity-pie-no-data');
-// Incidents Tab (Keep as is)
+// Incidents Tab
 const incidentsTableBody = document.getElementById('incidents-table-body');
 const podFilterInput = document.getElementById('pod-filter');
 const severityFilterSelect = document.getElementById('severity-filter');
@@ -39,20 +41,19 @@ const paginationControls = document.getElementById('pagination-controls');
 const paginationInfo = document.getElementById('pagination-info');
 const prevPageButton = document.getElementById('prev-page');
 const nextPageButton = document.getElementById('next-page');
-// Dashboard Tab (Keep as is)
+// Dashboard Tab
 const totalIncidentsElem = document.getElementById('total-incidents');
 const totalGeminiCallsElem = document.getElementById('total-gemini-calls');
 const totalTelegramAlertsElem = document.getElementById('total-telegram-alerts');
 const timeRangeButtons = document.querySelectorAll('.time-range-btn');
-// Settings Tab (Only global settings remain relevant here)
-// Removed selectors for global general/namespace settings
+// Settings Tab (Global Only)
 const saveTelegramConfigButton = document.getElementById('save-telegram-config-button');
 const saveAiConfigButton = document.getElementById('save-ai-config-button');
 const enableAiToggle = document.getElementById('enable-ai-toggle');
 // General UI
 const sidebarItems = document.querySelectorAll('.sidebar-item');
-const modalCloseButton = document.getElementById('modal-close-button');
-const modalOverlay = document.querySelector('.modal-overlay');
+const modalCloseButton = document.getElementById('modal-close-button'); // Incident modal close
+const modalOverlay = document.querySelector('.modal-overlay'); // Incident modal overlay
 // Kubernetes Monitoring Tab
 const agentStatusTableBody = document.getElementById('agent-status-table-body');
 const agentStatusErrorElem = document.getElementById('agent-status-error');
@@ -70,6 +71,21 @@ const agentNamespaceLoadingText = document.getElementById('agent-namespace-loadi
 const saveAgentNsConfigButton = document.getElementById('save-agent-ns-config-button');
 const saveAgentNsConfigStatus = document.getElementById('save-agent-ns-config-status');
 const closeAgentConfigButton = document.getElementById('close-agent-config-button');
+// User Management Tab
+const createUserForm = document.getElementById('create-user-form');
+const createUserButton = document.getElementById('create-user-button');
+const createUserStatus = document.getElementById('create-user-status');
+const newPasswordInput = document.getElementById('new-password');
+const confirmPasswordInput = document.getElementById('confirm-password');
+const passwordMatchError = document.getElementById('password-match-error');
+const usersTableBody = document.getElementById('users-table-body');
+const usersListErrorElem = document.getElementById('users-list-error');
+// Edit User Modal Elements (Added)
+const editUserModal = document.getElementById('edit-user-modal');
+const editUserModalCloseButton = document.getElementById('edit-user-modal-close-button');
+const editUserForm = document.getElementById('edit-user-form');
+const editUserStatus = document.getElementById('edit-user-status');
+const saveUserChangesButton = document.getElementById('save-user-changes-button');
 
 
 // === Data Loading and Rendering Logic ===
@@ -83,7 +99,7 @@ async function loadAgentStatus() {
         return;
     }
 
-    agentTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-500">Đang tải trạng thái agent...</td></tr>`; // Colspan is 5 now
+    agentTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-500">Đang tải trạng thái agent...</td></tr>`;
     agentErrorElem.classList.add('hidden');
 
     try {
@@ -99,66 +115,74 @@ async function loadAgentStatus() {
 
         agents.forEach(agent => {
             const row = document.createElement('tr');
-            row.setAttribute('data-agent-id', agent.agent_id); // Store agent_id
+            row.setAttribute('data-agent-id', agent.agent_id);
 
             const createCell = (content, isHtml = false) => {
                 const cell = document.createElement('td');
-                cell.className = 'px-4 py-3 text-sm text-gray-700 align-middle'; // Use align-middle
+                cell.className = 'px-4 py-3 text-sm text-gray-700 align-middle';
                 ui.setText(cell, content, isHtml);
                 return cell;
             };
 
-            // --- FIX START: Improve Action Cell Layout ---
             const actionCell = document.createElement('td');
-            actionCell.className = 'px-4 py-3 text-sm text-gray-700 align-middle'; // Match other cells
-
+            actionCell.className = 'px-4 py-3 text-sm text-gray-700 align-middle';
             const actionContainer = document.createElement('div');
-            actionContainer.className = 'flex items-center space-x-2'; // Use flexbox for alignment and spacing
+            actionContainer.className = 'flex items-center space-x-2';
 
-            const agentVersionText = agent.agent_version || 'N/A';
+            if (currentUserRole === 'admin') {
+                const configButton = document.createElement('button');
+                configButton.textContent = 'Cấu hình';
+                configButton.className = 'text-indigo-600 hover:text-indigo-900 hover:underline text-xs font-medium whitespace-nowrap configure-agent-btn';
+                configButton.onclick = () => handleConfigureAgentClick(agent.agent_id, agent.cluster_name);
+                actionContainer.appendChild(configButton);
+            }
 
-            // Create Configure button
-            const configButton = document.createElement('button');
-            configButton.textContent = 'Cấu hình';
-            configButton.className = 'text-indigo-600 hover:text-indigo-900 hover:underline text-xs font-medium whitespace-nowrap'; // Prevent button text wrapping
-            configButton.onclick = () => handleConfigureAgentClick(agent.agent_id, agent.cluster_name); // Pass agent_id and cluster_name
-
-            // Add N/A text only if version is N/A (Optional, adjust if needed)
-            // If you always want N/A if version is missing, keep this check.
-            // If you only want the button, remove the check and the span creation.
-            // if (agentVersionText === 'N/A') {
-            //     const naSpan = document.createElement('span');
-            //     naSpan.className = 'text-gray-400 italic text-xs'; // Style for N/A
-            //     naSpan.textContent = 'N/A';
-            //     actionContainer.appendChild(naSpan);
-            // }
-
-            actionContainer.appendChild(configButton); // Add the button
-            actionCell.appendChild(actionContainer); // Add the container to the cell
-            // --- FIX END ---
+            actionCell.appendChild(actionContainer);
 
             row.appendChild(createCell(`${agent.agent_id || 'N/A'} / ${agent.cluster_name || 'N/A'}`));
             row.appendChild(createCell(`<span class="severity-badge severity-info">Active</span>`, true));
             row.appendChild(createCell(ui.formatVietnameseDateTime(agent.last_seen_timestamp)));
-            row.appendChild(createCell(agentVersionText)); // Display version in its own cell
-            row.appendChild(actionCell); // Add the improved action cell
+            row.appendChild(createCell(agent.agent_version || 'N/A'));
+            row.appendChild(actionCell);
 
             agentTableBody.appendChild(row);
         });
 
     } catch (error) {
         console.error("DEBUG: Failed to load agent status:", error);
-        agentTableBody.innerHTML = ''; // Clear loading message
+        agentTableBody.innerHTML = '';
         agentErrorElem.classList.remove('hidden');
         ui.setText(agentErrorElem, `Lỗi tải trạng thái agent: ${error.message}`);
     }
 }
 
+async function loadUserManagementData() {
+    console.log("Loading user management data...");
+    if (!usersTableBody) return;
+
+    usersTableBody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-gray-500">Đang tải danh sách user...</td></tr>`; // Updated colspan
+    if (usersListErrorElem) usersListErrorElem.classList.add('hidden');
+    usersDataCache = {}; // Clear cache before loading
+
+    try {
+        const users = await api.fetchUsers();
+        // Cache user data by ID for editing
+        users.forEach(user => {
+            usersDataCache[user.id] = user;
+        });
+        // Pass the handleEditUserClick function to the renderer
+        ui.renderUserTable(users, handleEditUserClick);
+    } catch (error) {
+        console.error("Failed to load users:", error);
+        ui.showUserListError(`Lỗi tải danh sách user: ${error.message}`);
+    }
+}
+
+
 function loadActiveSectionData(activeSectionId) {
     console.log(`DEBUG: Loading data for section: ${activeSectionId}`);
-    // Hide agent config section when switching main sections
     if (agentConfigSection) agentConfigSection.classList.add('hidden');
-    currentConfiguringAgentId = null; // Reset configuring agent
+    currentConfiguringAgentId = null;
 
     switch (activeSectionId) {
         case 'dashboard':
@@ -171,18 +195,19 @@ function loadActiveSectionData(activeSectionId) {
             loadAgentStatus();
             break;
         case 'settings':
-            // Load only global settings (Telegram, AI)
             settings.loadTelegramSettings();
             settings.loadAiSettings();
             break;
+        case 'user-management':
+             loadUserManagementData();
+             break;
         default:
             console.warn(`Unhandled section ID: ${activeSectionId}`);
-            loadDashboardData(); // Default to dashboard
+            loadDashboardData();
     }
 }
 
 async function loadDashboardData() {
-    // (Keep existing dashboard loading logic, but ensure it DOES NOT call loadAgentStatus)
     ui.showLoading();
     if(lineChartErrorElem) lineChartErrorElem.classList.add('hidden');
     if(topPodsErrorElem) topPodsErrorElem.classList.add('hidden');
@@ -228,7 +253,6 @@ async function loadDashboardData() {
 }
 
 async function loadIncidentsData(forceReload = false) {
-    // (Keep existing incidents loading logic)
     const tableBody = document.getElementById('incidents-table-body');
     if (!tableBody) {
         console.error("Incidents table body not found!");
@@ -272,7 +296,9 @@ async function loadIncidentsData(forceReload = false) {
                     const cell = document.createElement('td');
                     cell.className = 'px-4 py-3 text-sm text-gray-700 align-top';
                     ui.setText(cell, content, isHtml);
-                    cell.title = cell.textContent;
+                    if (!isHtml) {
+                        cell.title = cell.textContent || '';
+                    }
                     cell.classList.toggle('whitespace-normal', allowWrap);
                     cell.classList.toggle('whitespace-nowrap', !allowWrap);
                     cell.classList.toggle('overflow-hidden', !allowWrap);
@@ -307,7 +333,6 @@ async function loadIncidentsData(forceReload = false) {
 }
 
 function loadAllSettings() {
-    // Load only global settings now
     settings.loadTelegramSettings();
     settings.loadAiSettings();
 }
@@ -318,55 +343,39 @@ async function handleConfigureAgentClick(agentId, clusterName) {
     console.log(`Configure button clicked for agent: ${agentId} (Cluster: ${clusterName})`);
     if (!agentConfigSection || !configAgentIdSpan) return;
 
-    currentConfiguringAgentId = agentId; // Store the agent ID being configured
+    currentConfiguringAgentId = agentId;
     ui.showLoading();
-    // Reset status messages
     if(saveAgentGeneralConfigStatus) saveAgentGeneralConfigStatus.classList.add('hidden');
     if(saveAgentNsConfigStatus) saveAgentNsConfigStatus.classList.add('hidden');
-    // Reset forms to default/empty state before loading
     resetAgentConfigForms();
 
-
-    // Display agent ID/Cluster Name
     ui.setText(configAgentIdSpan, `${agentId} (${clusterName || 'N/A'})`);
 
     try {
-        // Fetch agent's current config (general + namespaces)
-        // NOTE: This assumes fetchAgentConfig returns both general and namespace config
-        // Adjust if you have separate endpoints
         const agentConfig = await api.fetchAgentConfig(agentId);
-        console.log("Fetched agent config:", agentConfig); // DEBUG
+        console.log("Fetched agent config:", agentConfig);
 
-        // Populate General Settings Tab
         if (agentScanIntervalInput) agentScanIntervalInput.value = agentConfig.scan_interval_seconds ?? 30;
         if (agentRestartThresholdInput) agentRestartThresholdInput.value = agentConfig.restart_count_threshold ?? 5;
         if (agentLokiScanLevelSelect) agentLokiScanLevelSelect.value = agentConfig.loki_scan_min_level ?? 'INFO';
 
-        // Populate Namespaces Tab
         await renderAgentNamespaceList(agentConfig.monitored_namespaces || []);
 
-        // Show the config section and set the default tab
         agentConfigSection.classList.remove('hidden');
-        switchAgentConfigTab('agent-general'); // Default to general tab
+        switchAgentConfigTab('agent-general');
 
     } catch (error) {
         console.error(`Error loading configuration for agent ${agentId}:`, error);
         alert(`Không thể tải cấu hình cho agent ${agentId}: ${error.message}`);
-        // Optionally hide the section again on error
-        // agentConfigSection.classList.add('hidden');
-        // currentConfiguringAgentId = null;
     } finally {
         ui.hideLoading();
     }
 }
 
 function resetAgentConfigForms() {
-     // Reset general tab inputs
-     if (agentScanIntervalInput) agentScanIntervalInput.value = '30'; // Default value
-     if (agentRestartThresholdInput) agentRestartThresholdInput.value = '5'; // Default value
-     if (agentLokiScanLevelSelect) agentLokiScanLevelSelect.value = 'INFO'; // Default value
-
-     // Reset namespace tab
+     if (agentScanIntervalInput) agentScanIntervalInput.value = '30';
+     if (agentRestartThresholdInput) agentRestartThresholdInput.value = '5';
+     if (agentLokiScanLevelSelect) agentLokiScanLevelSelect.value = 'INFO';
      if (agentNamespaceListDiv) agentNamespaceListDiv.innerHTML = '';
      if (agentNamespaceLoadingText) {
          ui.setText(agentNamespaceLoadingText, 'Chọn agent để tải namespace...');
@@ -378,7 +387,7 @@ function resetAgentConfigForms() {
 async function renderAgentNamespaceList(monitoredNamespaces = []) {
     if (!agentNamespaceListDiv || !agentNamespaceLoadingText) return;
 
-    agentNamespaceListDiv.innerHTML = ''; // Clear previous list
+    agentNamespaceListDiv.innerHTML = '';
     agentNamespaceLoadingText.classList.remove('hidden');
     ui.setText(agentNamespaceLoadingText, 'Đang tải danh sách namespace khả dụng...');
 
@@ -395,7 +404,7 @@ async function renderAgentNamespaceList(monitoredNamespaces = []) {
                 div.className = 'namespace-item text-sm flex items-center';
                 const checkbox = document.createElement('input');
                 checkbox.type = 'checkbox';
-                checkbox.id = `agent-ns-${ns}`; // Unique ID for agent config
+                checkbox.id = `agent-ns-${ns}`;
                 checkbox.value = ns;
                 checkbox.checked = isChecked;
                 checkbox.className = 'form-checkbox h-4 w-4 text-indigo-600 transition duration-150 ease-in-out rounded border-gray-300 focus:ring-indigo-500';
@@ -440,14 +449,12 @@ async function handleSaveAgentGeneralConfig() {
 
     let configData;
     try {
-        // --- Validation ---
         const scanInterval = parseInt(agentScanIntervalInput?.value ?? '0');
         const restartThreshold = parseInt(agentRestartThresholdInput?.value ?? '0');
         const scanLevel = agentLokiScanLevelSelect?.value ?? 'INFO';
 
         if (isNaN(scanInterval) || scanInterval < 10) throw new Error("Tần suất quét phải là số >= 10.");
         if (isNaN(restartThreshold) || restartThreshold < 1) throw new Error("Ngưỡng khởi động lại phải là số >= 1.");
-        // --- End Validation ---
 
         configData = {
             scan_interval_seconds: scanInterval,
@@ -462,7 +469,7 @@ async function handleSaveAgentGeneralConfig() {
         console.error(`Error saving general config for agent ${currentConfiguringAgentId}:`, error);
         if (error.message.includes("phải là số")) {
              alert(`Lỗi dữ liệu nhập: ${error.message}`);
-             ui.showStatusMessage(saveAgentGeneralConfigStatus, '', 'info'); // Clear status
+             ui.showStatusMessage(saveAgentGeneralConfigStatus, '', 'info');
              if(saveAgentGeneralConfigStatus) saveAgentGeneralConfigStatus.classList.add('hidden');
         } else {
              ui.showStatusMessage(saveAgentGeneralConfigStatus, `Lỗi: ${error.message}`, 'error');
@@ -470,7 +477,6 @@ async function handleSaveAgentGeneralConfig() {
     } finally {
         ui.hideLoading();
         saveAgentGeneralConfigButton.disabled = false;
-        // Hide status message only if it wasn't a validation alert
         if (saveAgentGeneralConfigStatus && !saveAgentGeneralConfigStatus.classList.contains('hidden') && !alert.caller) {
             ui.hideStatusMessage(saveAgentGeneralConfigStatus);
         }
@@ -506,30 +512,172 @@ function handleCloseAgentConfig() {
     if (agentConfigSection) {
         agentConfigSection.classList.add('hidden');
     }
-    currentConfiguringAgentId = null; // Reset the currently configured agent
+    currentConfiguringAgentId = null;
+}
+
+// --- User Management Event Handlers ---
+
+/**
+ * Handles the click event for the "Edit" button in the user table.
+ * @param {object} user - The user data object associated with the clicked row.
+ */
+function handleEditUserClick(user) {
+    console.log("Edit button clicked for user:", user);
+    if (currentUserRole === 'admin') {
+        ui.openEditUserModal(user);
+    } else {
+        alert("Bạn không có quyền chỉnh sửa người dùng.");
+    }
+}
+
+/**
+ * Handles the submission of the "Create User" form.
+ * @param {Event} event - The form submission event.
+ */
+async function handleCreateUserSubmit(event) {
+    event.preventDefault();
+    if (!createUserForm || !createUserButton || !createUserStatus) return;
+
+    // Basic client-side validation
+    const password = newPasswordInput?.value;
+    const confirmPassword = confirmPasswordInput?.value;
+
+    if (password !== confirmPassword) {
+        if (passwordMatchError) passwordMatchError.classList.remove('hidden');
+        if (confirmPasswordInput) confirmPasswordInput.focus();
+        return;
+    } else {
+        if (passwordMatchError) passwordMatchError.classList.add('hidden');
+    }
+     if (password.length < 6) {
+         alert("Mật khẩu phải có ít nhất 6 ký tự.");
+         if (newPasswordInput) newPasswordInput.focus();
+         return;
+     }
+
+    ui.showLoading();
+    createUserButton.disabled = true;
+    ui.showStatusMessage(createUserStatus, 'Đang tạo user...', 'info');
+
+    // Prepare JSON data
+    const userData = {
+        username: createUserForm.elements['username'].value,
+        password: password, // Send the validated password
+        fullname: createUserForm.elements['fullname'].value,
+        role: createUserForm.elements['role'].value
+    };
+
+    try {
+        // Call API with JSON data
+        const result = await api.createUser(userData);
+        ui.showStatusMessage(createUserStatus, result.message || 'Tạo user thành công!', 'success');
+        ui.clearCreateUserForm(); // Clear the form on success
+        await loadUserManagementData(); // Refresh the user list
+    } catch (error) {
+        console.error("Error creating user:", error);
+        ui.showStatusMessage(createUserStatus, `Lỗi: ${error.message}`, 'error');
+    } finally {
+        ui.hideLoading();
+        createUserButton.disabled = false;
+        ui.hideStatusMessage(createUserStatus);
+    }
+}
+
+/**
+ * Handles the submission of the "Edit User" modal form.
+ * @param {Event} event - The form submission event.
+ */
+async function handleEditUserSubmit(event) {
+    event.preventDefault();
+    if (!editUserForm || !saveUserChangesButton || !editUserStatus) return;
+
+    const userId = document.getElementById('edit-user-id')?.value;
+    if (!userId) {
+        console.error("User ID not found in edit form.");
+        ui.showStatusMessage(editUserStatus, 'Lỗi: Không tìm thấy ID người dùng.', 'error');
+        ui.hideStatusMessage(editUserStatus);
+        return;
+    }
+
+    ui.showLoading();
+    saveUserChangesButton.disabled = true;
+    ui.showStatusMessage(editUserStatus, 'Đang lưu thay đổi...', 'info');
+
+    // Prepare data for update (only send fields that can be updated)
+    const userDataToUpdate = {
+        fullname: document.getElementById('edit-fullname')?.value,
+        role: document.getElementById('edit-role')?.value
+    };
+
+    try {
+        const result = await api.updateUser(userId, userDataToUpdate);
+        ui.showStatusMessage(editUserStatus, result.message || 'Cập nhật thành công!', 'success');
+        ui.closeEditUserModal(); // Close modal on success
+        await loadUserManagementData(); // Refresh the user list
+    } catch (error) {
+        console.error(`Error updating user ${userId}:`, error);
+        ui.showStatusMessage(editUserStatus, `Lỗi: ${error.message}`, 'error');
+    } finally {
+        ui.hideLoading();
+        saveUserChangesButton.disabled = false;
+        // Don't auto-hide error messages in the modal immediately
+        if (!editUserStatus.textContent.startsWith('Lỗi')) {
+             ui.hideStatusMessage(editUserStatus);
+        }
+    }
+}
+
+
+// --- Role-Based Permissions ---
+function applyRolePermissions() {
+    const isAdmin = (currentUserRole === 'admin');
+    console.log(`Applying permissions for role: ${currentUserRole}, isAdmin: ${isAdmin}`);
+
+    // Hide/Show Sidebar Items and Content Sections
+    document.querySelector('a[href="#settings"]')?.parentElement?.classList.toggle('hidden', !isAdmin);
+    document.querySelector('a[href="#user-management"]')?.parentElement?.classList.toggle('hidden', !isAdmin);
+    // Don't hide content sections here, setActiveSection handles visibility
+
+    // Disable/Enable Buttons based on role
+    if (saveTelegramConfigButton) saveTelegramConfigButton.disabled = !isAdmin;
+    if (saveAiConfigButton) saveAiConfigButton.disabled = !isAdmin;
+    if (saveAgentGeneralConfigButton) saveAgentGeneralConfigButton.disabled = !isAdmin;
+    if (saveAgentNsConfigButton) saveAgentNsConfigButton.disabled = !isAdmin;
+    if (createUserButton) createUserButton.disabled = !isAdmin;
+    if (saveUserChangesButton) saveUserChangesButton.disabled = !isAdmin; // Disable edit save button if not admin
+
+    // Hide elements within sections if needed (e.g., edit buttons in table if not admin)
+    // This is handled during table rendering in ui.js now
 }
 
 
 // === Event Listener Setup ===
 document.addEventListener('DOMContentLoaded', () => {
-    // Set default date range for Incidents tab
-    const today = new Date();
-    currentIncidentStartDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0, 0)).toISOString();
-    currentIncidentEndDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 23, 59, 59, 999)).toISOString();
+    currentUserRole = document.body.dataset.userRole || 'user';
+    applyRolePermissions(); // Apply permissions based on role
 
-    // Initial section load
-    ui.setActiveSection('dashboard', loadActiveSectionData);
+    // Set initial date range for incidents (optional, maybe default to all)
+    // const today = new Date();
+    // currentIncidentStartDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0, 0)).toISOString();
+    // currentIncidentEndDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 23, 59, 59, 999)).toISOString();
 
-    // Sidebar navigation
+    ui.setActiveSection('dashboard', loadActiveSectionData); // Load dashboard by default
+
+    // Sidebar Navigation
     sidebarItems.forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
             const targetId = item.getAttribute('href')?.substring(1);
+            // Check permissions before navigating
+            if ((targetId === 'settings' || targetId === 'user-management') && currentUserRole !== 'admin') {
+                console.warn("Attempted to navigate to admin section without permission.");
+                return; // Prevent navigation
+            }
             if(targetId) ui.setActiveSection(targetId, loadActiveSectionData);
         });
     });
 
-    // Incident Filters & Pagination (Keep as is)
+    // Incident Filtering and Pagination
     if (filterButton) filterButton.addEventListener('click', () => {
         currentPodFilter = podFilterInput?.value || '';
         currentSeverityFilter = severityFilterSelect?.value || '';
@@ -545,19 +693,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentIncidentPage < totalIncidentPages) { currentIncidentPage++; loadIncidentsData(true); }
     });
 
-    // Dashboard Time Range Buttons (Keep as is)
+    // Dashboard Time Range
     timeRangeButtons.forEach(button => {
         button.addEventListener('click', () => {
             const days = parseInt(button.getAttribute('data-days'));
             currentStatsDays = days;
-            const endDate = new Date(); const startDate = new Date();
-            startDate.setDate(endDate.getDate() - days + 1);
-            currentIncidentStartDate = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate(), 0, 0, 0, 0)).toISOString();
-            currentIncidentEndDate = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate(), 23, 59, 59, 999)).toISOString();
-            loadDashboardData();
-            if (document.getElementById('incidents-content')?.classList.contains('hidden') === false) {
-                currentIncidentPage = 1; loadIncidentsData(true);
-            }
+            // Update date range for incidents if needed (or remove if not desired)
+            // const endDate = new Date(); const startDate = new Date();
+            // startDate.setDate(endDate.getDate() - days + 1);
+            // currentIncidentStartDate = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate(), 0, 0, 0, 0)).toISOString();
+            // currentIncidentEndDate = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate(), 23, 59, 59, 999)).toISOString();
+            loadDashboardData(); // Reload dashboard data
+            // Reload incidents only if the section is active
+            // if (document.getElementById('incidents-content')?.classList.contains('hidden') === false) {
+            //     currentIncidentPage = 1; loadIncidentsData(true);
+            // }
+            // Update button styles
             timeRangeButtons.forEach(btn => {
                  btn.classList.remove('bg-blue-500', 'text-white');
                  btn.classList.add('bg-gray-300', 'text-gray-700');
@@ -567,18 +718,17 @@ document.addEventListener('DOMContentLoaded', () => {
             button.classList.remove('bg-gray-300', 'text-gray-700');
             button.disabled = true;
         });
+         // Initialize with 'Hôm nay' selected
          if (button.getAttribute('data-days') === '1') { button.click(); }
          else { button.disabled = false; }
     });
 
-    // Global Settings Save Buttons (Telegram, AI)
+    // Settings Tab Event Listeners
     if (saveTelegramConfigButton) saveTelegramConfigButton.addEventListener('click', settings.saveTelegramSettings);
     if (saveAiConfigButton) saveAiConfigButton.addEventListener('click', settings.saveAiSettings);
-
-    // Global Settings Toggles
     if (enableAiToggle) enableAiToggle.addEventListener('change', settings.handleAiToggleChange);
 
-    // Agent Configuration Event Listeners
+    // Kubernetes Monitoring Tab Event Listeners
     if (agentConfigTabs) {
         agentConfigTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -593,11 +743,41 @@ document.addEventListener('DOMContentLoaded', () => {
     if (saveAgentNsConfigButton) saveAgentNsConfigButton.addEventListener('click', handleSaveAgentNamespaces);
     if (closeAgentConfigButton) closeAgentConfigButton.addEventListener('click', handleCloseAgentConfig);
 
+    // User Management Tab Event Listeners
+    if (createUserForm) createUserForm.addEventListener('submit', handleCreateUserSubmit);
+    if (editUserForm) editUserForm.addEventListener('submit', handleEditUserSubmit); // Listener for edit form
 
-    // Modal Handling (Keep as is)
-    if (modalCloseButton) modalCloseButton.addEventListener('click', ui.closeModal);
-    if (modalOverlay) modalOverlay.addEventListener('click', (event) => { if (event.target === modalOverlay) ui.closeModal(); });
-    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && document.getElementById('incident-modal')?.classList.contains('modal-visible')) ui.closeModal(); });
+    // Password confirmation validation
+    if (confirmPasswordInput) {
+        confirmPasswordInput.addEventListener('input', () => {
+            if (newPasswordInput?.value !== confirmPasswordInput.value) {
+                if (passwordMatchError) passwordMatchError.classList.remove('hidden');
+            } else {
+                if (passwordMatchError) passwordMatchError.classList.add('hidden');
+            }
+        });
+    }
+     if (newPasswordInput) {
+         newPasswordInput.addEventListener('input', () => {
+             if (confirmPasswordInput?.value && newPasswordInput.value !== confirmPasswordInput.value) {
+                 if (passwordMatchError) passwordMatchError.classList.remove('hidden');
+             } else {
+                 if (passwordMatchError) passwordMatchError.classList.add('hidden');
+             }
+         });
+     }
+
+    // Modal Close Listeners
+    if (modalCloseButton) modalCloseButton.addEventListener('click', ui.closeModal); // Incident modal
+    if (editUserModalCloseButton) editUserModalCloseButton.addEventListener('click', ui.closeEditUserModal); // Edit user modal
+    if (modalOverlay) modalOverlay.addEventListener('click', (event) => { if (event.target === modalOverlay) ui.closeModal(); }); // Incident modal overlay click
+    if (editUserModal) editUserModal.addEventListener('click', (event) => { if (event.target === editUserModal) ui.closeEditUserModal(); }); // Edit user modal overlay click
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+             if (document.getElementById('incident-modal')?.classList.contains('modal-visible')) ui.closeModal();
+             if (editUserModal && !editUserModal.classList.contains('hidden')) ui.closeEditUserModal();
+        }
+    });
 
     console.log("DEBUG: main.js loaded and event listeners attached.");
 

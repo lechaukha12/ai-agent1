@@ -11,8 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code&display=swap" rel="stylesheet">
 </head>
-<body class="bg-gray-100 text-gray-900">
-    <div class="flex h-screen overflow-hidden">
+<body class="bg-gray-100 text-gray-900" data-user-role="{{ current_user.role }}"> <div class="flex h-screen overflow-hidden">
 
         {% include '_sidebar.html' %}
 
@@ -22,7 +21,9 @@
 
             {% include '_dashboard_content.html' %}
             {% include '_incidents_content.html' %}
-            {% include '_kubernetes_monitoring_content.html' %} {% include '_settings_content.html' %}
+            {% include '_kubernetes_monitoring_content.html' %}
+            {% include '_settings_content.html' %}
+            {% include '_user_management_content.html' %} {# <-- ADDED THIS LINE #}
 
         </main>
     </div>
