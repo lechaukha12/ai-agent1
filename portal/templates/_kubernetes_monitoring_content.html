@@ -5,6 +5,22 @@
     </header>
 
     <div class="bg-white p-4 md:p-6 rounded-lg shadow border border-gray-200 mb-8">
+        <h3 class="text-lg font-semibold mb-4 text-gray-700">Thông tin Cluster</h3>
+        <div id="cluster-info-loading" class="text-center py-4 text-gray-500">Đang tải thông tin cluster...</div>
+        <div id="cluster-info-error" class="text-center py-4 text-red-500 hidden">Lỗi tải thông tin cluster.</div>
+        <div id="cluster-info-content" class="hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+             <div><span class="font-medium text-gray-600">Phiên bản K8s:</span> <span id="cluster-k8s-version" class="text-gray-800">--</span></div>
+             <div><span class="font-medium text-gray-600">Nền tảng:</span> <span id="cluster-platform" class="text-gray-800">--</span></div>
+             <div><span class="font-medium text-gray-600">Tổng số Nodes:</span> <span id="cluster-total-nodes" class="text-gray-800">--</span></div>
+             <div><span class="font-medium text-gray-600">Tổng CPU (Capacity):</span> <span id="cluster-cpu-capacity" class="text-gray-800">--</span></div>
+             <div><span class="font-medium text-gray-600">Tổng Memory (Capacity):</span> <span id="cluster-memory-capacity" class="text-gray-800">--</span></div>
+             <div><span class="font-medium text-gray-600">OS Image (Sample):</span> <span id="cluster-os-image" class="text-gray-800">--</span></div>
+             <div><span class="font-medium text-gray-600">Kernel (Sample):</span> <span id="cluster-kernel-version" class="text-gray-800">--</span></div>
+             <div><span class="font-medium text-gray-600">Kubelet (Sample):</span> <span id="cluster-kubelet-version" class="text-gray-800">--</span></div>
+        </div>
+    </div>
+
+    <div class="bg-white p-4 md:p-6 rounded-lg shadow border border-gray-200 mb-8">
         <h3 class="text-lg font-semibold mb-4 text-gray-700">Trạng thái Agent</h3>
         <div class="overflow-x-auto">
             <table id="agent-status-table" class="min-w-full divide-y divide-gray-200">

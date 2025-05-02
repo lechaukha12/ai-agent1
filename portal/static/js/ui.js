@@ -1,13 +1,11 @@
 // portal/static/js/ui.js
 
-// --- DOM Element Selectors ---
 const loadingSpinner = document.getElementById('loading-spinner');
 const loadingOverlay = document.getElementById('loading-overlay');
 const sidebarItems = document.querySelectorAll('.sidebar-item');
 const contentSections = document.querySelectorAll('.content-section');
 const incidentModal = document.getElementById('incident-modal');
 const modalOverlay = document.querySelector('.modal-overlay');
-// Incident Modal Content Elements
 const modalTimestamp = document.getElementById('modal-timestamp');
 const modalPodKey = document.getElementById('modal-pod-key');
 const modalSeverity = document.getElementById('modal-severity');
@@ -19,10 +17,8 @@ const modalSampleLogs = document.getElementById('modal-sample-logs');
 const modalK8sContext = document.getElementById('modal-k8s-context');
 const modalInputPrompt = document.getElementById('modal-input-prompt');
 const modalRawAiResponse = document.getElementById('modal-raw-ai-response');
-// User Management Table
 const usersTableBody = document.getElementById('users-table-body');
 const usersListErrorElem = document.getElementById('users-list-error');
-// Edit User Modal Elements
 const editUserModal = document.getElementById('edit-user-modal');
 const editUserModalCloseButton = document.getElementById('edit-user-modal-close-button');
 const editUserForm = document.getElementById('edit-user-form');
@@ -32,9 +28,18 @@ const editFullnameInput = document.getElementById('edit-fullname');
 const editRoleSelect = document.getElementById('edit-role');
 const editUserStatus = document.getElementById('edit-user-status');
 const saveUserChangesButton = document.getElementById('save-user-changes-button');
+const clusterInfoLoading = document.getElementById('cluster-info-loading');
+const clusterInfoError = document.getElementById('cluster-info-error');
+const clusterInfoContent = document.getElementById('cluster-info-content');
+const clusterK8sVersion = document.getElementById('cluster-k8s-version');
+const clusterPlatform = document.getElementById('cluster-platform');
+const clusterTotalNodes = document.getElementById('cluster-total-nodes');
+const clusterCpuCapacity = document.getElementById('cluster-cpu-capacity');
+const clusterMemoryCapacity = document.getElementById('cluster-memory-capacity');
+const clusterOsImage = document.getElementById('cluster-os-image');
+const clusterKernelVersion = document.getElementById('cluster-kernel-version');
+const clusterKubeletVersion = document.getElementById('cluster-kubelet-version');
 
-
-// --- Utility Functions ---
 
 export function showLoading() {
     if (loadingSpinner) loadingSpinner.classList.remove('hidden');
@@ -70,11 +75,10 @@ export function setText(element, text, isHtml = false) {
          if (isHtml) {
              element.innerHTML = content;
          } else {
-             // Handle case where text might be 'N/A' but we want the italicized version
              if (content === na_html) {
                  element.innerHTML = na_html;
              } else {
-                 element.textContent = text; // Set text content directly
+                 element.textContent = text;
              }
          }
     }
@@ -116,8 +120,6 @@ export function hideStatusMessage(statusElement, delay = 3000) {
         }, delay);
 }
 
-
-// --- Incident Modal Functions ---
 
 export function openModal(incidentData) {
     if (!incidentData || !incidentModal) {
@@ -166,8 +168,6 @@ export function closeModal() {
 }
 
 
-// --- Navigation Logic ---
-
 export function setActiveSection(targetId, loadSectionDataCallback) {
     contentSections.forEach(section => {
         section.classList.add('hidden');
@@ -198,13 +198,6 @@ export function setActiveSection(targetId, loadSectionDataCallback) {
     }
 }
 
-// --- User Management UI Functions ---
-
-/**
- * Renders the list of users into the table.
- * @param {Array<object>} users - Array of user objects from the API.
- * @param {function} editUserCallback - Function to call when edit button is clicked.
- */
 export function renderUserTable(users, editUserCallback) {
     if (!usersTableBody) {
         console.error("User table body element not found.");
@@ -215,43 +208,38 @@ export function renderUserTable(users, editUserCallback) {
     usersTableBody.innerHTML = '';
 
     if (!users || users.length === 0) {
-        // Updated colspan to 4 to include the new Action column
         usersTableBody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-gray-500">Không có người dùng nào.</td></tr>`;
         return;
     }
 
     users.forEach(user => {
         const row = document.createElement('tr');
-        row.setAttribute('data-user-id', user.id); // Store user ID on the row
+        row.setAttribute('data-user-id', user.id);
 
-        // Username Cell
         const userCell = document.createElement('td');
         userCell.className = 'px-4 py-2 text-sm text-gray-900 font-medium';
         setText(userCell, user.username);
         row.appendChild(userCell);
 
-        // Full Name Cell
         const nameCell = document.createElement('td');
         nameCell.className = 'px-4 py-2 text-sm text-gray-600';
-        setText(nameCell, user.fullname); // Use setText helper
+        setText(nameCell, user.fullname);
         row.appendChild(nameCell);
 
-        // Role Cell
         const roleCell = document.createElement('td');
         roleCell.className = 'px-4 py-2 text-sm text-gray-600';
         setText(roleCell, user.role);
         row.appendChild(roleCell);
 
-        // Action Cell (New)
         const actionCell = document.createElement('td');
         actionCell.className = 'px-4 py-2 text-sm text-gray-600';
         const editButton = document.createElement('button');
         editButton.textContent = 'Sửa';
         editButton.className = 'text-indigo-600 hover:text-indigo-900 hover:underline text-xs font-medium';
         editButton.onclick = (event) => {
-            event.stopPropagation(); // Prevent row click event if any
+            event.stopPropagation();
             if (typeof editUserCallback === 'function') {
-                editUserCallback(user); // Pass the full user object
+                editUserCallback(user);
             }
         };
         actionCell.appendChild(editButton);
@@ -261,10 +249,6 @@ export function renderUserTable(users, editUserCallback) {
     });
 }
 
-/**
- * Shows an error message related to the user list.
- * @param {string} message - The error message to display.
- */
 export function showUserListError(message) {
     if (usersTableBody) usersTableBody.innerHTML = '';
     if (usersListErrorElem) {
@@ -273,9 +257,6 @@ export function showUserListError(message) {
     }
 }
 
-/**
- * Clears the "Create User" form fields.
- */
 export function clearCreateUserForm() {
     const form = document.getElementById('create-user-form');
     if (form) {
@@ -285,43 +266,62 @@ export function clearCreateUserForm() {
     if (passwordError) passwordError.classList.add('hidden');
 }
 
-// --- Edit User Modal Functions (New) ---
-
-/**
- * Opens the Edit User modal and populates it with data.
- * @param {object} userData - The user data object {id, username, fullname, role}.
- */
 export function openEditUserModal(userData) {
     if (!editUserModal || !editUserForm) return;
     populateEditUserModal(userData);
     editUserModal.classList.remove('hidden');
-    editUserModal.classList.add('flex'); // Use flex to center vertically
-    document.body.style.overflow = 'hidden'; // Prevent background scrolling
+    editUserModal.classList.add('flex');
+    document.body.style.overflow = 'hidden';
 }
 
-/**
- * Closes the Edit User modal.
- */
 export function closeEditUserModal() {
     if (!editUserModal) return;
     editUserModal.classList.add('hidden');
     editUserModal.classList.remove('flex');
-    document.body.style.overflow = ''; // Restore background scrolling
-    // Clear status message when closing
+    document.body.style.overflow = '';
     if (editUserStatus) {
         editUserStatus.classList.add('hidden');
         editUserStatus.textContent = '';
     }
 }
 
-/**
- * Populates the Edit User modal form fields.
- * @param {object} userData - The user data object.
- */
 export function populateEditUserModal(userData) {
     if (!editUserIdInput || !editUsernameInput || !editFullnameInput || !editRoleSelect) return;
     editUserIdInput.value = userData.id || '';
     editUsernameInput.value = userData.username || '';
     editFullnameInput.value = userData.fullname || '';
     editRoleSelect.value = userData.role || 'user';
+}
+
+// --- NEW: Render Cluster Info ---
+export function renderClusterInfo(data) {
+    if (!clusterInfoLoading || !clusterInfoError || !clusterInfoContent) return;
+
+    clusterInfoLoading.classList.add('hidden');
+    clusterInfoError.classList.add('hidden');
+    clusterInfoContent.classList.remove('hidden');
+
+    setText(clusterK8sVersion, data.kubernetes_version);
+    setText(clusterPlatform, data.platform);
+    setText(clusterTotalNodes, data.total_nodes);
+    setText(clusterCpuCapacity, data.total_cpu_capacity);
+    setText(clusterMemoryCapacity, data.total_memory_capacity);
+    setText(clusterOsImage, data.os_image_sample);
+    setText(clusterKernelVersion, data.kernel_version_sample);
+    setText(clusterKubeletVersion, data.kubelet_version_sample);
+}
+
+export function showClusterInfoLoading() {
+    if (!clusterInfoLoading || !clusterInfoError || !clusterInfoContent) return;
+    clusterInfoLoading.classList.remove('hidden');
+    clusterInfoError.classList.add('hidden');
+    clusterInfoContent.classList.add('hidden');
+}
+
+export function showClusterInfoError(message) {
+    if (!clusterInfoLoading || !clusterInfoError || !clusterInfoContent) return;
+    clusterInfoLoading.classList.add('hidden');
+    clusterInfoError.classList.remove('hidden');
+    clusterInfoContent.classList.add('hidden');
+    setText(clusterInfoError, message || 'Lỗi tải thông tin cluster.');
 }

@@ -4,7 +4,6 @@ import * as ui from './ui.js';
 import * as charts from './charts.js';
 import * as settings from './settings.js';
 
-// === State Variables ===
 let currentIncidentPage = 1;
 let totalIncidentPages = 1;
 let currentPodFilter = '';
@@ -12,13 +11,11 @@ let currentSeverityFilter = '';
 let currentStatsDays = 1;
 let currentIncidentStartDate = null;
 let currentIncidentEndDate = null;
-let incidentsDataCache = {}; // Cache for incident details
-let usersDataCache = {}; // Cache for user details (for editing)
+let incidentsDataCache = {};
+let usersDataCache = {};
 let currentConfiguringAgentId = null;
 let currentUserRole = 'user';
 
-// === DOM Element Selectors ===
-// Charts
 const lineChartCtx = document.getElementById('statsChart')?.getContext('2d');
 const lineChartErrorElem = document.getElementById('line-chart-error');
 const lineChartNoDataElem = document.getElementById('line-chart-no-data');
@@ -31,7 +28,6 @@ const namespacePieNoDataElem = document.getElementById('namespace-pie-no-data');
 const severityPieCtx = document.getElementById('severityPieChart')?.getContext('2d');
 const severityPieErrorElem = document.getElementById('severity-pie-error');
 const severityPieNoDataElem = document.getElementById('severity-pie-no-data');
-// Incidents Tab
 const incidentsTableBody = document.getElementById('incidents-table-body');
 const podFilterInput = document.getElementById('pod-filter');
 const severityFilterSelect = document.getElementById('severity-filter');
@@ -41,20 +37,16 @@ const paginationControls = document.getElementById('pagination-controls');
 const paginationInfo = document.getElementById('pagination-info');
 const prevPageButton = document.getElementById('prev-page');
 const nextPageButton = document.getElementById('next-page');
-// Dashboard Tab
 const totalIncidentsElem = document.getElementById('total-incidents');
 const totalGeminiCallsElem = document.getElementById('total-gemini-calls');
 const totalTelegramAlertsElem = document.getElementById('total-telegram-alerts');
 const timeRangeButtons = document.querySelectorAll('.time-range-btn');
-// Settings Tab (Global Only)
 const saveTelegramConfigButton = document.getElementById('save-telegram-config-button');
 const saveAiConfigButton = document.getElementById('save-ai-config-button');
 const enableAiToggle = document.getElementById('enable-ai-toggle');
-// General UI
 const sidebarItems = document.querySelectorAll('.sidebar-item');
-const modalCloseButton = document.getElementById('modal-close-button'); // Incident modal close
-const modalOverlay = document.querySelector('.modal-overlay'); // Incident modal overlay
-// Kubernetes Monitoring Tab
+const modalCloseButton = document.getElementById('modal-close-button');
+const modalOverlay = document.querySelector('.modal-overlay');
 const agentStatusTableBody = document.getElementById('agent-status-table-body');
 const agentStatusErrorElem = document.getElementById('agent-status-error');
 const agentConfigSection = document.getElementById('agent-config-section');
@@ -71,7 +63,6 @@ const agentNamespaceLoadingText = document.getElementById('agent-namespace-loadi
 const saveAgentNsConfigButton = document.getElementById('save-agent-ns-config-button');
 const saveAgentNsConfigStatus = document.getElementById('save-agent-ns-config-status');
 const closeAgentConfigButton = document.getElementById('close-agent-config-button');
-// User Management Tab
 const createUserForm = document.getElementById('create-user-form');
 const createUserButton = document.getElementById('create-user-button');
 const createUserStatus = document.getElementById('create-user-status');
@@ -80,15 +71,12 @@ const confirmPasswordInput = document.getElementById('confirm-password');
 const passwordMatchError = document.getElementById('password-match-error');
 const usersTableBody = document.getElementById('users-table-body');
 const usersListErrorElem = document.getElementById('users-list-error');
-// Edit User Modal Elements (Added)
 const editUserModal = document.getElementById('edit-user-modal');
 const editUserModalCloseButton = document.getElementById('edit-user-modal-close-button');
 const editUserForm = document.getElementById('edit-user-form');
 const editUserStatus = document.getElementById('edit-user-status');
 const saveUserChangesButton = document.getElementById('save-user-changes-button');
 
-
-// === Data Loading and Rendering Logic ===
 
 async function loadAgentStatus() {
     const agentTableBody = document.getElementById('agent-status-table-body');
@@ -106,7 +94,7 @@ async function loadAgentStatus() {
         const data = await api.fetchAgentStatus();
         const agents = data.active_agents || [];
 
-        agentTableBody.innerHTML = ''; // Clear loading message
+        agentTableBody.innerHTML = '';
 
         if (agents.length === 0) {
             agentTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-500">Không có agent nào đang hoạt động.</td></tr>`;
@@ -160,21 +148,31 @@ async function loadUserManagementData() {
     console.log("Loading user management data...");
     if (!usersTableBody) return;
 
-    usersTableBody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-gray-500">Đang tải danh sách user...</td></tr>`; // Updated colspan
+    usersTableBody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-gray-500">Đang tải danh sách user...</td></tr>`;
     if (usersListErrorElem) usersListErrorElem.classList.add('hidden');
-    usersDataCache = {}; // Clear cache before loading
+    usersDataCache = {};
 
     try {
         const users = await api.fetchUsers();
-        // Cache user data by ID for editing
         users.forEach(user => {
             usersDataCache[user.id] = user;
         });
-        // Pass the handleEditUserClick function to the renderer
         ui.renderUserTable(users, handleEditUserClick);
     } catch (error) {
         console.error("Failed to load users:", error);
         ui.showUserListError(`Lỗi tải danh sách user: ${error.message}`);
+    }
+}
+
+
+async function loadClusterInformation() {
+    ui.showClusterInfoLoading();
+    try {
+        const clusterData = await api.fetchClusterInfo();
+        ui.renderClusterInfo(clusterData);
+    } catch (error) {
+        console.error("Failed to load cluster information:", error);
+        ui.showClusterInfoError(error.message);
     }
 }
 
@@ -192,6 +190,7 @@ function loadActiveSectionData(activeSectionId) {
             loadIncidentsData(true);
             break;
         case 'kubernetes-monitoring':
+            loadClusterInformation();
             loadAgentStatus();
             break;
         case 'settings':
@@ -337,7 +336,6 @@ function loadAllSettings() {
     settings.loadAiSettings();
 }
 
-// --- Agent Configuration Handling ---
 
 async function handleConfigureAgentClick(agentId, clusterName) {
     console.log(`Configure button clicked for agent: ${agentId} (Cluster: ${clusterName})`);
@@ -515,12 +513,7 @@ function handleCloseAgentConfig() {
     currentConfiguringAgentId = null;
 }
 
-// --- User Management Event Handlers ---
 
-/**
- * Handles the click event for the "Edit" button in the user table.
- * @param {object} user - The user data object associated with the clicked row.
- */
 function handleEditUserClick(user) {
     console.log("Edit button clicked for user:", user);
     if (currentUserRole === 'admin') {
@@ -530,15 +523,11 @@ function handleEditUserClick(user) {
     }
 }
 
-/**
- * Handles the submission of the "Create User" form.
- * @param {Event} event - The form submission event.
- */
+
 async function handleCreateUserSubmit(event) {
     event.preventDefault();
     if (!createUserForm || !createUserButton || !createUserStatus) return;
 
-    // Basic client-side validation
     const password = newPasswordInput?.value;
     const confirmPassword = confirmPasswordInput?.value;
 
@@ -559,20 +548,18 @@ async function handleCreateUserSubmit(event) {
     createUserButton.disabled = true;
     ui.showStatusMessage(createUserStatus, 'Đang tạo user...', 'info');
 
-    // Prepare JSON data
     const userData = {
         username: createUserForm.elements['username'].value,
-        password: password, // Send the validated password
+        password: password,
         fullname: createUserForm.elements['fullname'].value,
         role: createUserForm.elements['role'].value
     };
 
     try {
-        // Call API with JSON data
         const result = await api.createUser(userData);
         ui.showStatusMessage(createUserStatus, result.message || 'Tạo user thành công!', 'success');
-        ui.clearCreateUserForm(); // Clear the form on success
-        await loadUserManagementData(); // Refresh the user list
+        ui.clearCreateUserForm();
+        await loadUserManagementData();
     } catch (error) {
         console.error("Error creating user:", error);
         ui.showStatusMessage(createUserStatus, `Lỗi: ${error.message}`, 'error');
@@ -583,10 +570,7 @@ async function handleCreateUserSubmit(event) {
     }
 }
 
-/**
- * Handles the submission of the "Edit User" modal form.
- * @param {Event} event - The form submission event.
- */
+
 async function handleEditUserSubmit(event) {
     event.preventDefault();
     if (!editUserForm || !saveUserChangesButton || !editUserStatus) return;
@@ -603,7 +587,6 @@ async function handleEditUserSubmit(event) {
     saveUserChangesButton.disabled = true;
     ui.showStatusMessage(editUserStatus, 'Đang lưu thay đổi...', 'info');
 
-    // Prepare data for update (only send fields that can be updated)
     const userDataToUpdate = {
         fullname: document.getElementById('edit-fullname')?.value,
         role: document.getElementById('edit-role')?.value
@@ -612,15 +595,14 @@ async function handleEditUserSubmit(event) {
     try {
         const result = await api.updateUser(userId, userDataToUpdate);
         ui.showStatusMessage(editUserStatus, result.message || 'Cập nhật thành công!', 'success');
-        ui.closeEditUserModal(); // Close modal on success
-        await loadUserManagementData(); // Refresh the user list
+        ui.closeEditUserModal();
+        await loadUserManagementData();
     } catch (error) {
         console.error(`Error updating user ${userId}:`, error);
         ui.showStatusMessage(editUserStatus, `Lỗi: ${error.message}`, 'error');
     } finally {
         ui.hideLoading();
         saveUserChangesButton.disabled = false;
-        // Don't auto-hide error messages in the modal immediately
         if (!editUserStatus.textContent.startsWith('Lỗi')) {
              ui.hideStatusMessage(editUserStatus);
         }
@@ -628,56 +610,41 @@ async function handleEditUserSubmit(event) {
 }
 
 
-// --- Role-Based Permissions ---
 function applyRolePermissions() {
     const isAdmin = (currentUserRole === 'admin');
     console.log(`Applying permissions for role: ${currentUserRole}, isAdmin: ${isAdmin}`);
 
-    // Hide/Show Sidebar Items and Content Sections
     document.querySelector('a[href="#settings"]')?.parentElement?.classList.toggle('hidden', !isAdmin);
     document.querySelector('a[href="#user-management"]')?.parentElement?.classList.toggle('hidden', !isAdmin);
-    // Don't hide content sections here, setActiveSection handles visibility
 
-    // Disable/Enable Buttons based on role
     if (saveTelegramConfigButton) saveTelegramConfigButton.disabled = !isAdmin;
     if (saveAiConfigButton) saveAiConfigButton.disabled = !isAdmin;
     if (saveAgentGeneralConfigButton) saveAgentGeneralConfigButton.disabled = !isAdmin;
     if (saveAgentNsConfigButton) saveAgentNsConfigButton.disabled = !isAdmin;
     if (createUserButton) createUserButton.disabled = !isAdmin;
-    if (saveUserChangesButton) saveUserChangesButton.disabled = !isAdmin; // Disable edit save button if not admin
+    if (saveUserChangesButton) saveUserChangesButton.disabled = !isAdmin;
 
-    // Hide elements within sections if needed (e.g., edit buttons in table if not admin)
-    // This is handled during table rendering in ui.js now
 }
 
 
-// === Event Listener Setup ===
 document.addEventListener('DOMContentLoaded', () => {
     currentUserRole = document.body.dataset.userRole || 'user';
-    applyRolePermissions(); // Apply permissions based on role
+    applyRolePermissions();
 
-    // Set initial date range for incidents (optional, maybe default to all)
-    // const today = new Date();
-    // currentIncidentStartDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0, 0)).toISOString();
-    // currentIncidentEndDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 23, 59, 59, 999)).toISOString();
+    ui.setActiveSection('dashboard', loadActiveSectionData);
 
-    ui.setActiveSection('dashboard', loadActiveSectionData); // Load dashboard by default
-
-    // Sidebar Navigation
     sidebarItems.forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
             const targetId = item.getAttribute('href')?.substring(1);
-            // Check permissions before navigating
             if ((targetId === 'settings' || targetId === 'user-management') && currentUserRole !== 'admin') {
                 console.warn("Attempted to navigate to admin section without permission.");
-                return; // Prevent navigation
+                return;
             }
             if(targetId) ui.setActiveSection(targetId, loadActiveSectionData);
         });
     });
 
-    // Incident Filtering and Pagination
     if (filterButton) filterButton.addEventListener('click', () => {
         currentPodFilter = podFilterInput?.value || '';
         currentSeverityFilter = severityFilterSelect?.value || '';
@@ -693,22 +660,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentIncidentPage < totalIncidentPages) { currentIncidentPage++; loadIncidentsData(true); }
     });
 
-    // Dashboard Time Range
     timeRangeButtons.forEach(button => {
         button.addEventListener('click', () => {
             const days = parseInt(button.getAttribute('data-days'));
             currentStatsDays = days;
-            // Update date range for incidents if needed (or remove if not desired)
-            // const endDate = new Date(); const startDate = new Date();
-            // startDate.setDate(endDate.getDate() - days + 1);
-            // currentIncidentStartDate = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate(), 0, 0, 0, 0)).toISOString();
-            // currentIncidentEndDate = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate(), 23, 59, 59, 999)).toISOString();
-            loadDashboardData(); // Reload dashboard data
-            // Reload incidents only if the section is active
-            // if (document.getElementById('incidents-content')?.classList.contains('hidden') === false) {
-            //     currentIncidentPage = 1; loadIncidentsData(true);
-            // }
-            // Update button styles
+            loadDashboardData();
             timeRangeButtons.forEach(btn => {
                  btn.classList.remove('bg-blue-500', 'text-white');
                  btn.classList.add('bg-gray-300', 'text-gray-700');
@@ -718,17 +674,14 @@ document.addEventListener('DOMContentLoaded', () => {
             button.classList.remove('bg-gray-300', 'text-gray-700');
             button.disabled = true;
         });
-         // Initialize with 'Hôm nay' selected
          if (button.getAttribute('data-days') === '1') { button.click(); }
          else { button.disabled = false; }
     });
 
-    // Settings Tab Event Listeners
     if (saveTelegramConfigButton) saveTelegramConfigButton.addEventListener('click', settings.saveTelegramSettings);
     if (saveAiConfigButton) saveAiConfigButton.addEventListener('click', settings.saveAiSettings);
     if (enableAiToggle) enableAiToggle.addEventListener('change', settings.handleAiToggleChange);
 
-    // Kubernetes Monitoring Tab Event Listeners
     if (agentConfigTabs) {
         agentConfigTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -743,11 +696,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (saveAgentNsConfigButton) saveAgentNsConfigButton.addEventListener('click', handleSaveAgentNamespaces);
     if (closeAgentConfigButton) closeAgentConfigButton.addEventListener('click', handleCloseAgentConfig);
 
-    // User Management Tab Event Listeners
     if (createUserForm) createUserForm.addEventListener('submit', handleCreateUserSubmit);
-    if (editUserForm) editUserForm.addEventListener('submit', handleEditUserSubmit); // Listener for edit form
+    if (editUserForm) editUserForm.addEventListener('submit', handleEditUserSubmit);
 
-    // Password confirmation validation
     if (confirmPasswordInput) {
         confirmPasswordInput.addEventListener('input', () => {
             if (newPasswordInput?.value !== confirmPasswordInput.value) {
@@ -767,11 +718,10 @@ document.addEventListener('DOMContentLoaded', () => {
          });
      }
 
-    // Modal Close Listeners
-    if (modalCloseButton) modalCloseButton.addEventListener('click', ui.closeModal); // Incident modal
-    if (editUserModalCloseButton) editUserModalCloseButton.addEventListener('click', ui.closeEditUserModal); // Edit user modal
-    if (modalOverlay) modalOverlay.addEventListener('click', (event) => { if (event.target === modalOverlay) ui.closeModal(); }); // Incident modal overlay click
-    if (editUserModal) editUserModal.addEventListener('click', (event) => { if (event.target === editUserModal) ui.closeEditUserModal(); }); // Edit user modal overlay click
+    if (modalCloseButton) modalCloseButton.addEventListener('click', ui.closeModal);
+    if (editUserModalCloseButton) editUserModalCloseButton.addEventListener('click', ui.closeEditUserModal);
+    if (modalOverlay) modalOverlay.addEventListener('click', (event) => { if (event.target === modalOverlay) ui.closeModal(); });
+    if (editUserModal) editUserModal.addEventListener('click', (event) => { if (event.target === editUserModal) ui.closeEditUserModal(); });
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
              if (document.getElementById('incident-modal')?.classList.contains('modal-visible')) ui.closeModal();
@@ -781,4 +731,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
     console.log("DEBUG: main.js loaded and event listeners attached.");
 
-}); // End DOMContentLoaded
+});

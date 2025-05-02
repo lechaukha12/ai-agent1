@@ -13,7 +13,6 @@ import json
 import sys
 from functools import wraps
 
-# --- Logging, Flask App, Config, LoginManager, Bcrypt Setup ---
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper(),
                     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
                     stream=sys.stdout)
@@ -33,9 +32,8 @@ login_manager.login_message_category = "info"
 bcrypt = Bcrypt(app)
 BE_DB_PATH = os.environ.get("BE_DB_PATH", "/auth-data/be_users.db")
 
-# --- User Database Functions ---
+
 def get_be_db_connection():
-    """Gets a connection to the Portal's user database."""
     try:
         db_dir = os.path.dirname(BE_DB_PATH)
         if db_dir and not os.path.exists(db_dir):
@@ -49,14 +47,12 @@ def get_be_db_connection():
         return None
 
 def init_be_db():
-    """Initializes the Portal's user database schema."""
     conn = get_be_db_connection()
     if conn:
         try:
             with conn:
                 cursor = conn.cursor()
                 logger.info("Initializing BE User DB Schema...")
-                # Ensure users table exists WITHOUT avatar_url
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS users (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,11 +60,9 @@ def init_be_db():
                         password TEXT NOT NULL,
                         role TEXT NOT NULL DEFAULT 'user',
                         fullname TEXT
-                        -- REMOVED: avatar_url TEXT
                     )''')
                 logger.info("Table 'users' ensured (without avatar_url).")
 
-                # Check if columns exist before altering (still useful)
                 table_info = cursor.execute("PRAGMA table_info(users)").fetchall()
                 column_names = [col['name'] for col in table_info]
 
@@ -78,9 +72,7 @@ def init_be_db():
                 if 'fullname' not in column_names:
                     cursor.execute("ALTER TABLE users ADD COLUMN fullname TEXT")
                     logger.info("Added 'fullname' column to users table.")
-                # REMOVED: Check and add avatar_url column
 
-                # Create default admin user if not exists
                 username_to_create = 'khalc'
                 password_to_create = 'chaukha'
                 cursor.execute("SELECT COUNT(*) FROM users WHERE username = ?", (username_to_create,))
@@ -89,7 +81,6 @@ def init_be_db():
                 if user_count == 0:
                     try:
                         hashed_password = bcrypt.generate_password_hash(password_to_create).decode('utf-8')
-                        # Insert WITHOUT avatar URL
                         cursor.execute("""
                             INSERT INTO users (username, password, role, fullname)
                             VALUES (?, ?, ?, ?)
@@ -100,7 +91,6 @@ def init_be_db():
                     except Exception as insert_err:
                         logger.error(f"Failed to insert default user '{username_to_create}': {insert_err}", exc_info=True)
                 else:
-                    # Ensure the default user is admin
                     cursor.execute("SELECT role FROM users WHERE username = ?", (username_to_create,))
                     current_role_row = cursor.fetchone()
                     if current_role_row and current_role_row['role'] != 'admin':
@@ -131,19 +121,15 @@ def init_be_db():
             if conn: conn.close()
     return False
 
-# Run DB initialization on startup
 init_be_db()
 
-# --- User Model ---
 class User(UserMixin):
-    # REMOVED avatar_url from __init__ parameters and self.avatar_url assignment
     def __init__(self, id, username, password_hash, role='user', fullname=None):
         self.id = id
         self.username = username
         self.password = password_hash
         self.role = role or 'user'
         self.fullname = fullname
-        # No self.avatar_url assignment needed
 
     @staticmethod
     def get(user_id):
@@ -152,8 +138,6 @@ class User(UserMixin):
         if conn:
             try:
                 cursor = conn.cursor()
-                # Select necessary columns (password hash for login check)
-                # REMOVED avatar_url from SELECT
                 cursor.execute("SELECT id, username, password, role, fullname FROM users WHERE id = ?", (user_id,))
                 user_data = cursor.fetchone()
             except Exception as e:
@@ -161,7 +145,6 @@ class User(UserMixin):
             finally:
                 conn.close()
         if user_data:
-            # REMOVED avatar_url from User instantiation
             return User(
                 id=user_data['id'],
                 username=user_data['username'],
@@ -178,8 +161,6 @@ class User(UserMixin):
         if conn:
             try:
                 cursor = conn.cursor()
-                # Select necessary columns
-                # REMOVED avatar_url from SELECT
                 cursor.execute("SELECT id, username, password, role, fullname FROM users WHERE username = ?", (username,))
                 user_data = cursor.fetchone()
             except Exception as e:
@@ -187,7 +168,6 @@ class User(UserMixin):
             finally:
                 conn.close()
         if user_data:
-            # REMOVED avatar_url from User instantiation
             return User(
                 id=user_data['id'],
                 username=user_data['username'],
@@ -199,24 +179,19 @@ class User(UserMixin):
 
     @staticmethod
     def get_all():
-        """Fetches all users from the database."""
         conn = get_be_db_connection()
         users = []
         if conn:
             try:
                 cursor = conn.cursor()
-                # Select non-sensitive columns
-                # REMOVED avatar_url from SELECT
                 cursor.execute("SELECT id, username, role, fullname FROM users ORDER BY username")
                 rows = cursor.fetchall()
-                # REMOVED default_avatar logic
                 for row in rows:
                     users.append({
                         "id": row['id'],
                         "username": row['username'],
                         "role": row['role'],
                         "fullname": row['fullname']
-                        # REMOVED "avatar_url": default_avatar
                     })
             except Exception as e:
                 logger.error(f"Error getting all BE users: {e}")
@@ -224,12 +199,10 @@ class User(UserMixin):
                 conn.close()
         return users
 
-# --- Flask-Login Loader ---
 @login_manager.user_loader
 def load_user(user_id):
     return User.get(user_id)
 
-# --- Admin Required Decorator ---
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -243,9 +216,7 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# --- Helper function to call ObsEngine API ---
 def call_obs_engine_api(endpoint, method='GET', params=None, json_data=None):
-    # (Keep existing call_obs_engine_api logic - no changes needed here)
     if not OBS_ENGINE_API_URL: logger.error("ObsEngine API URL is not configured."); return None, 503
     url = f"{OBS_ENGINE_API_URL}{endpoint}"; headers = {'Accept': 'application/json'}
     if method == 'POST' and json_data: headers['Content-Type'] = 'application/json'
@@ -269,7 +240,6 @@ def call_obs_engine_api(endpoint, method='GET', params=None, json_data=None):
     except Exception as e: logger.error(f"Unexpected error calling ObsEngine API: {method} {url} - Error: {e}", exc_info=True); return {"error": "Unexpected internal error"}, 500
 
 
-# --- Main Routes ---
 @app.route('/')
 @login_required
 def index():
@@ -281,7 +251,6 @@ def index():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # (Keep existing login logic)
     if current_user.is_authenticated: return redirect(url_for('index'))
     if request.method == 'POST':
         username = request.form.get('username'); password = request.form.get('password'); remember = bool(request.form.get('remember'))
@@ -297,11 +266,9 @@ def login():
 @app.route('/logout')
 @login_required
 def logout():
-    # (Keep existing logout logic)
     logger.info(f"User '{current_user.username}' logging out."); logout_user(); flash('Bạn đã đăng xuất.', 'info'); return redirect(url_for('login'))
 
-# --- API Proxy Routes ---
-# (Keep existing proxy routes - no changes needed here)
+
 @app.route('/api/incidents')
 @login_required
 def get_incidents():
@@ -326,8 +293,7 @@ def get_available_namespaces():
     elif status_code != 200: return jsonify({"error": "Failed to fetch namespaces from backend"}), status_code
     return jsonify(data), status_code
 
-# --- Global Config Proxy Route ---
-# (Keep existing config proxy route - no changes needed here)
+
 @app.route('/api/config/<config_type>', methods=['GET', 'POST'])
 @login_required
 def config_route(config_type):
@@ -361,8 +327,7 @@ def config_route(config_type):
         return jsonify(data), status_code
     else: return jsonify({"error": "Method not allowed"}), 405
 
-# --- Agent-Specific Config Proxy Routes ---
-# (Keep existing agent config proxy routes - no changes needed here)
+
 @app.route('/api/agents/<agent_id>/config', methods=['GET'])
 @login_required
 def get_agent_config_proxy(agent_id):
@@ -397,21 +362,18 @@ def save_agent_namespaces_proxy(agent_id):
     return jsonify(data), status_code
 
 
-# --- User Management API Routes ---
 @app.route('/api/users', methods=['GET'])
 @login_required
 @admin_required
 def get_users():
-    """API endpoint to get a list of all users."""
     users = User.get_all()
     return jsonify(users), 200
 
-# --- create_user route (No Avatar) ---
+
 @app.route('/api/users', methods=['POST'])
 @login_required
 @admin_required
 def create_user():
-    """API endpoint to create a new user (JSON only, no avatar)."""
     logger.debug(f"Create user request received (JSON). Content-Type: {request.content_type}")
 
     if not request.is_json:
@@ -423,7 +385,6 @@ def create_user():
     fullname = data.get('fullname')
     role = data.get('role')
 
-    # Basic Validation
     if not username or not password:
         return jsonify({"error": "Username and password are required"}), 400
     if len(password) < 6:
@@ -431,12 +392,10 @@ def create_user():
     if role not in ['admin', 'user']:
         return jsonify({"error": "Invalid role specified"}), 400
     if User.find_by_username(username):
-        return jsonify({"error": f"Username '{username}' already exists"}), 409 # Conflict
+        return jsonify({"error": f"Username '{username}' already exists"}), 409
 
-    # Hash password
     hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
 
-    # Save to DB (without avatar_url)
     conn = get_be_db_connection()
     if conn:
         try:
@@ -445,7 +404,7 @@ def create_user():
                 cursor.execute("""
                     INSERT INTO users (username, password, role, fullname)
                     VALUES (?, ?, ?, ?)
-                """, (username, hashed_password, role, fullname)) # REMOVED avatar_url
+                """, (username, hashed_password, role, fullname))
                 new_user_id = cursor.lastrowid
             logger.info(f"Admin '{current_user.username}' created new user '{username}' (ID: {new_user_id}) with role '{role}'.")
 
@@ -458,7 +417,6 @@ def create_user():
                          "username": new_user_data.username,
                          "fullname": new_user_data.fullname,
                          "role": new_user_data.role
-                         # REMOVED "avatar_url": ...
                      }
                  }), 201
             else:
@@ -473,14 +431,12 @@ def create_user():
             if conn: conn.close()
     else:
         return jsonify({"error": "Database connection failed"}), 500
-# --- END create_user ---
 
-# --- NEW: update_user route ---
+
 @app.route('/api/users/<int:user_id>', methods=['PUT'])
 @login_required
 @admin_required
 def update_user(user_id):
-    """API endpoint to update user's fullname and role (Admin only)."""
     logger.debug(f"Update user request received for user ID: {user_id}. Content-Type: {request.content_type}")
 
     if not request.is_json:
@@ -490,33 +446,11 @@ def update_user(user_id):
     fullname = data.get('fullname')
     role = data.get('role')
 
-    # Validation
-    if fullname is None and role is None: # Check if at least one field is provided
+    if fullname is None and role is None:
         return jsonify({"error": "At least fullname or role must be provided for update"}), 400
     if role is not None and role not in ['admin', 'user']:
         return jsonify({"error": "Invalid role specified"}), 400
 
-    # Prevent admin from accidentally demoting the last admin? (Optional but recommended)
-    # This logic might need refinement based on how you identify the 'last' admin.
-    # For simplicity, we'll skip this check for now, but it's important in production.
-    # if role == 'user':
-    #     target_user = User.get(user_id)
-    #     if target_user and target_user.role == 'admin':
-    #         # Check if this is the only admin left
-    #         conn_check = get_be_db_connection()
-    #         if conn_check:
-    #             try:
-    #                 cursor = conn_check.cursor()
-    #                 cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
-    #                 admin_count = cursor.fetchone()[0]
-    #                 if admin_count <= 1:
-    #                     return jsonify({"error": "Cannot remove the last admin role"}), 400
-    #             except Exception as e:
-    #                 logger.error(f"Error checking admin count: {e}")
-    #             finally:
-    #                 conn_check.close()
-
-    # Update in DB
     conn = get_be_db_connection()
     if conn:
         try:
@@ -531,7 +465,7 @@ def update_user(user_id):
                     update_fields.append("role = ?")
                     params.append(role)
 
-                if not update_fields: # Should not happen due to earlier check, but good practice
+                if not update_fields:
                      return jsonify({"error": "No fields provided for update"}), 400
 
                 params.append(user_id)
@@ -543,7 +477,7 @@ def update_user(user_id):
 
             logger.info(f"Admin '{current_user.username}' updated user ID {user_id}. Fields updated: {', '.join(update_fields)}")
 
-            updated_user_data = User.get(user_id) # Fetch updated data
+            updated_user_data = User.get(user_id)
             if updated_user_data:
                  return jsonify({
                      "message": "User updated successfully",
@@ -555,7 +489,6 @@ def update_user(user_id):
                      }
                  }), 200
             else:
-                 # Should not happen if rowcount > 0, but handle defensively
                  return jsonify({"message": "User updated, but failed to retrieve updated details."}), 200
 
         except sqlite3.Error as e:
@@ -568,10 +501,16 @@ def update_user(user_id):
             if conn: conn.close()
     else:
         return jsonify({"error": "Database connection failed"}), 500
-# --- END NEW update_user ---
+
+# --- NEW: Cluster Info Proxy ---
+@app.route('/api/cluster/info')
+@login_required
+def get_cluster_info_proxy():
+    logger.info("Forwarding request to ObsEngine: GET /api/cluster/info")
+    data, status_code = call_obs_engine_api('/api/cluster/info')
+    return jsonify(data), status_code
 
 
-# --- Main Execution Guard ---
 if __name__ == '__main__':
     flask_port = int(os.environ.get("FLASK_PORT", 5000))
     debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"

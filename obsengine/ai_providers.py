@@ -1,11 +1,13 @@
+# ai-agent1/obsengine/ai_providers.py
 import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted
 import requests
 import json
 import re
 import logging
 import threading
 import os
-from datetime import datetime # <--- Added missing import
+from datetime import datetime
 
 gemini_model_instance = None
 last_used_gemini_api_key = None
@@ -52,7 +54,6 @@ def get_default_analysis(severity, initial_reasons):
      troubleshooting_steps = "Kiểm tra ngữ cảnh Kubernetes và log chi tiết thủ công."
      return {"severity": severity, "summary": summary, "root_cause": root_cause, "troubleshooting_steps": troubleshooting_steps}
 
-
 def _call_gemini_api(api_key, model_identifier, prompt):
     global gemini_model_instance, last_used_gemini_api_key, last_used_gemini_model_id
     try:
@@ -79,6 +80,12 @@ def _call_gemini_api(api_key, model_identifier, prompt):
         )
         logging.debug("[AI Provider] Content generation successful.")
         return response
+    except ResourceExhausted as quota_error:
+        logging.warning(f"[AI Provider] Gemini API quota exceeded for model '{model_identifier}'. Error: {quota_error.message}")
+        gemini_model_instance = None
+        last_used_gemini_api_key = None
+        last_used_gemini_model_id = None
+        raise
     except Exception as e:
         logging.error(f"[AI Provider] Error calling Gemini API: {e}", exc_info=True)
         gemini_model_instance = None
@@ -177,12 +184,16 @@ def perform_analysis(log_batch, k8s_context, initial_reasons, config, prompt_tem
         logging.info("[AI Analysis] AI analysis is disabled by configuration.")
         analysis_failed = True
     else:
-        namespace = "unknown"; pod_name = "unknown_pod"
+        namespace = "unknown_namespace"
+        pod_name = "unknown_pod"
         if log_batch and isinstance(log_batch, list) and len(log_batch) > 0 and isinstance(log_batch[0], dict) and log_batch[0].get('labels'):
-             labels = log_batch[0].get('labels', {}); namespace = labels.get('namespace', namespace); pod_name = labels.get('pod', pod_name)
+             labels = log_batch[0].get('labels', {})
+             namespace = labels.get('namespace', namespace)
+             pod_name = labels.get('pod', pod_name)
         elif k8s_context:
-             match_ns = re.search(r"Pod:\s*([\w.-]+)/", k8s_context); match_pod = re.search(r"Pod:\s*[\w.-]+/([\w.-]+)\n", k8s_context);
-             if match_ns: namespace = match_ns.group(1);
+             match_ns = re.search(r"Pod:\s*([\w.-]+)/", k8s_context)
+             match_pod = re.search(r"Pod:\s*[\w.-]+/([\w.-]+)\n", k8s_context)
+             if match_ns: namespace = match_ns.group(1)
              if match_pod: pod_name = match_pod.group(1)
 
         log_text = "N/A"
@@ -192,15 +203,15 @@ def perform_analysis(log_batch, k8s_context, initial_reasons, config, prompt_tem
                  if isinstance(entry, dict) and 'timestamp' in entry and 'message' in entry:
                      ts = entry['timestamp']
                      ts_str = ts.isoformat() if isinstance(ts, datetime) else str(ts)
-                     msg = str(entry['message'])
-                     limited_logs.append(f"[{ts_str}] {msg[:500]}")
+                     msg = str(entry['message'])[:500]
+                     limited_logs.append(f"[{ts_str}] {msg}")
              log_text = "\n".join(limited_logs)
-
 
         try:
             final_prompt = prompt_template.format(
                 namespace=namespace, pod_name=pod_name,
-                k8s_context=k8s_context[:10000], log_text=log_text[:20000]
+                k8s_context=k8s_context[:10000],
+                log_text=log_text[:20000]
             )
         except KeyError as e:
             logging.error(f"[AI Analysis] Missing placeholder in PROMPT_TEMPLATE: {e}. Using default prompt structure.")
@@ -208,7 +219,6 @@ def perform_analysis(log_batch, k8s_context, initial_reasons, config, prompt_tem
         except Exception as format_err:
              logging.error(f"[AI Analysis] Error formatting prompt: {format_err}. Using default prompt structure.", exc_info=True)
              final_prompt = f"Phân tích pod {namespace}/{pod_name}. Ngữ cảnh K8s: {k8s_context[:10000]}. Logs: {log_text[:20000]}. Chỉ trả lời bằng JSON với khóa 'severity', 'summary', 'root_cause', 'troubleshooting_steps'."
-
 
         provider = config.get('ai_provider', 'none')
         api_key = config.get('ai_api_key', '')
@@ -240,7 +250,6 @@ def perform_analysis(log_batch, k8s_context, initial_reasons, config, prompt_tem
          analysis_result.setdefault("troubleshooting_steps", "N/A")
 
     return analysis_result, final_prompt, raw_response_text
-
 
 def get_and_reset_model_calls():
     global model_calls_counter
