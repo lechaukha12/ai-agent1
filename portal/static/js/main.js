@@ -2,7 +2,7 @@
 import * as api from './api.js';
 import * as ui from './ui.js';
 import * as charts from './charts.js';
-import * as settings from './settings.js';
+import * as settings from './settings.js'; // Keep for global settings (Telegram, AI)
 
 // === State Variables ===
 let currentIncidentPage = 1;
@@ -13,9 +13,10 @@ let currentStatsDays = 1;
 let currentIncidentStartDate = null;
 let currentIncidentEndDate = null;
 let incidentsDataCache = {};
+let currentConfiguringAgentId = null; // Track which agent is being configured
 
 // === DOM Element Selectors ===
-// Charts
+// Charts (Keep as is)
 const lineChartCtx = document.getElementById('statsChart')?.getContext('2d');
 const lineChartErrorElem = document.getElementById('line-chart-error');
 const lineChartNoDataElem = document.getElementById('line-chart-no-data');
@@ -28,7 +29,7 @@ const namespacePieNoDataElem = document.getElementById('namespace-pie-no-data');
 const severityPieCtx = document.getElementById('severityPieChart')?.getContext('2d');
 const severityPieErrorElem = document.getElementById('severity-pie-error');
 const severityPieNoDataElem = document.getElementById('severity-pie-no-data');
-// Incidents Tab
+// Incidents Tab (Keep as is)
 const incidentsTableBody = document.getElementById('incidents-table-body');
 const podFilterInput = document.getElementById('pod-filter');
 const severityFilterSelect = document.getElementById('severity-filter');
@@ -38,14 +39,13 @@ const paginationControls = document.getElementById('pagination-controls');
 const paginationInfo = document.getElementById('pagination-info');
 const prevPageButton = document.getElementById('prev-page');
 const nextPageButton = document.getElementById('next-page');
-// Dashboard Tab
+// Dashboard Tab (Keep as is)
 const totalIncidentsElem = document.getElementById('total-incidents');
 const totalGeminiCallsElem = document.getElementById('total-gemini-calls');
 const totalTelegramAlertsElem = document.getElementById('total-telegram-alerts');
 const timeRangeButtons = document.querySelectorAll('.time-range-btn');
-// Settings Tab
-const saveNsConfigButton = document.getElementById('save-ns-config-button');
-const saveGeneralConfigButton = document.getElementById('save-general-config-button');
+// Settings Tab (Only global settings remain relevant here)
+// Removed selectors for global general/namespace settings
 const saveTelegramConfigButton = document.getElementById('save-telegram-config-button');
 const saveAiConfigButton = document.getElementById('save-ai-config-button');
 const enableAiToggle = document.getElementById('enable-ai-toggle');
@@ -53,75 +53,120 @@ const enableAiToggle = document.getElementById('enable-ai-toggle');
 const sidebarItems = document.querySelectorAll('.sidebar-item');
 const modalCloseButton = document.getElementById('modal-close-button');
 const modalOverlay = document.querySelector('.modal-overlay');
-// Agent Status Elements
+// Kubernetes Monitoring Tab
 const agentStatusTableBody = document.getElementById('agent-status-table-body');
 const agentStatusErrorElem = document.getElementById('agent-status-error');
+const agentConfigSection = document.getElementById('agent-config-section');
+const configAgentIdSpan = document.getElementById('config-agent-id');
+const agentConfigTabs = document.querySelectorAll('.agent-config-tab');
+const agentConfigTabContents = document.querySelectorAll('.agent-config-tab-content');
+const agentScanIntervalInput = document.getElementById('agent-scan-interval');
+const agentRestartThresholdInput = document.getElementById('agent-restart-threshold');
+const agentLokiScanLevelSelect = document.getElementById('agent-loki-scan-level');
+const saveAgentGeneralConfigButton = document.getElementById('save-agent-general-config-button');
+const saveAgentGeneralConfigStatus = document.getElementById('save-agent-general-config-status');
+const agentNamespaceListDiv = document.getElementById('agent-namespace-list');
+const agentNamespaceLoadingText = document.getElementById('agent-namespace-loading-text');
+const saveAgentNsConfigButton = document.getElementById('save-agent-ns-config-button');
+const saveAgentNsConfigStatus = document.getElementById('save-agent-ns-config-status');
+const closeAgentConfigButton = document.getElementById('close-agent-config-button');
 
 
 // === Data Loading and Rendering Logic ===
 
-function loadActiveSectionData(activeSectionId) {
-    console.log(`DEBUG: Loading data for section: ${activeSectionId}`);
-    switch (activeSectionId) {
-        case 'dashboard': loadDashboardData(); break;
-        case 'incidents': loadIncidentsData(true); break;
-        case 'settings': loadAllSettings(); break;
-    }
-}
-
-// --- Function to load and render agent status ---
 async function loadAgentStatus() {
-    if (!agentStatusTableBody || !agentStatusErrorElem) return;
+    const agentTableBody = document.getElementById('agent-status-table-body');
+    const agentErrorElem = document.getElementById('agent-status-error');
 
-    agentStatusTableBody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-gray-500 dark:text-gray-400">Đang tải trạng thái agent...</td></tr>`;
-    agentStatusErrorElem.classList.add('hidden');
+    if (!agentTableBody || !agentErrorElem) {
+        console.warn("Agent status table elements not found. Skipping load.");
+        return;
+    }
+
+    agentTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-500">Đang tải trạng thái agent...</td></tr>`; // Colspan is 5 now
+    agentErrorElem.classList.add('hidden');
 
     try {
         const data = await api.fetchAgentStatus();
         const agents = data.active_agents || [];
 
-        agentStatusTableBody.innerHTML = '';
+        agentTableBody.innerHTML = ''; // Clear loading message
 
         if (agents.length === 0) {
-            agentStatusTableBody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-gray-500 dark:text-gray-400">Không có agent nào đang hoạt động.</td></tr>`;
+            agentTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-500">Không có agent nào đang hoạt động.</td></tr>`;
             return;
         }
 
         agents.forEach(agent => {
             const row = document.createElement('tr');
+            row.setAttribute('data-agent-id', agent.agent_id); // Store agent_id
 
             const createCell = (content, isHtml = false) => {
                 const cell = document.createElement('td');
-                cell.className = 'px-4 py-3 text-sm text-gray-700 dark:text-gray-300 align-middle';
+                cell.className = 'px-4 py-3 text-sm text-gray-700 align-middle';
                 ui.setText(cell, content, isHtml);
                 return cell;
             };
+
+            // Add "Configure" button
+            const actionCell = createCell('', true);
+            const configButton = document.createElement('button');
+            configButton.textContent = 'Cấu hình';
+            configButton.className = 'text-indigo-600 hover:text-indigo-900 hover:underline text-xs font-medium';
+            configButton.onclick = () => handleConfigureAgentClick(agent.agent_id, agent.cluster_name); // Pass agent_id and cluster_name
+            actionCell.appendChild(configButton);
 
             row.appendChild(createCell(`${agent.agent_id || 'N/A'} / ${agent.cluster_name || 'N/A'}`));
             row.appendChild(createCell(`<span class="severity-badge severity-info">Active</span>`, true));
             row.appendChild(createCell(ui.formatVietnameseDateTime(agent.last_seen_timestamp)));
             row.appendChild(createCell(agent.agent_version || 'N/A'));
+            row.appendChild(actionCell); // Add the action cell
 
-            agentStatusTableBody.appendChild(row);
+            agentTableBody.appendChild(row);
         });
 
     } catch (error) {
         console.error("DEBUG: Failed to load agent status:", error);
-        agentStatusTableBody.innerHTML = '';
-        agentStatusErrorElem.classList.remove('hidden');
-        agentStatusErrorElem.textContent = `Lỗi tải trạng thái agent: ${error.message}`;
+        agentTableBody.innerHTML = ''; // Clear loading message
+        agentErrorElem.classList.remove('hidden');
+        ui.setText(agentErrorElem, `Lỗi tải trạng thái agent: ${error.message}`);
+    }
+}
+
+function loadActiveSectionData(activeSectionId) {
+    console.log(`DEBUG: Loading data for section: ${activeSectionId}`);
+    // Hide agent config section when switching main sections
+    if (agentConfigSection) agentConfigSection.classList.add('hidden');
+    currentConfiguringAgentId = null; // Reset configuring agent
+
+    switch (activeSectionId) {
+        case 'dashboard':
+            loadDashboardData();
+            break;
+        case 'incidents':
+            loadIncidentsData(true);
+            break;
+        case 'kubernetes-monitoring':
+            loadAgentStatus();
+            break;
+        case 'settings':
+            // Load only global settings (Telegram, AI)
+            settings.loadTelegramSettings();
+            settings.loadAiSettings();
+            break;
+        default:
+            console.warn(`Unhandled section ID: ${activeSectionId}`);
+            loadDashboardData(); // Default to dashboard
     }
 }
 
 async function loadDashboardData() {
+    // (Keep existing dashboard loading logic, but ensure it DOES NOT call loadAgentStatus)
     ui.showLoading();
     if(lineChartErrorElem) lineChartErrorElem.classList.add('hidden');
     if(topPodsErrorElem) topPodsErrorElem.classList.add('hidden');
     if(namespacePieErrorElem) namespacePieErrorElem.classList.add('hidden');
     if(severityPieErrorElem) severityPieErrorElem.classList.add('hidden');
-
-    // Call loadAgentStatus when dashboard loads
-    loadAgentStatus();
 
     try {
         const statsData = await api.fetchStats(currentStatsDays);
@@ -141,7 +186,7 @@ async function loadDashboardData() {
 
         if (currentStatsDays === 1) {
             charts.renderSeverityPieChart(severityPieCtx, severityPieErrorElem, severityPieNoDataElem, statsData.severity_distribution_today || {});
-            if (severityPieNoDataElem) severityPieNoDataElem.textContent = `Không có sự cố hôm nay.`;
+            if (severityPieNoDataElem) ui.setText(severityPieNoDataElem, `Không có sự cố hôm nay.`);
         } else {
             charts.clearSeverityPieChart(severityPieNoDataElem, `Xem theo ngày để thấy phân loại mức độ.`);
         }
@@ -156,20 +201,24 @@ async function loadDashboardData() {
         if(topPodsErrorElem) topPodsErrorElem.classList.remove('hidden');
         if(namespacePieErrorElem) namespacePieErrorElem.classList.remove('hidden');
         if(severityPieErrorElem) severityPieErrorElem.classList.remove('hidden');
-
     } finally {
         ui.hideLoading();
     }
 }
 
 async function loadIncidentsData(forceReload = false) {
-    const tableBodyContent = incidentsTableBody?.innerHTML.trim() || '';
+    // (Keep existing incidents loading logic)
+    const tableBody = document.getElementById('incidents-table-body');
+    if (!tableBody) {
+        console.error("Incidents table body not found!");
+        return;
+    }
+    const tableBodyContent = tableBody.innerHTML.trim() || '';
     if (!forceReload && tableBodyContent && !tableBodyContent.includes('Đang tải dữ liệu') && !tableBodyContent.includes('Không tìm thấy')) {
-        console.log("DEBUG: Incidents table already populated, skipping fetch.");
         return;
     }
     ui.showLoading();
-    if (incidentsTableBody) incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-500">Đang tải dữ liệu...</td></tr>`;
+    tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-500">Đang tải dữ liệu...</td></tr>`;
     if (paginationControls) paginationControls.classList.add('hidden');
     incidentsDataCache = {};
 
@@ -178,66 +227,48 @@ async function loadIncidentsData(forceReload = false) {
         const incidents = data.incidents;
         const pagination = data.pagination;
         totalIncidentPages = pagination.total_pages;
-
-        if (incidentsTableBody) {
-            incidentsTableBody.innerHTML = '';
-            if (incidents.length === 0) {
-                incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-500">Không tìm thấy sự cố nào khớp.</td></tr>`;
-            } else {
-                console.log(`DEBUG: Rendering ${incidents.length} incidents.`);
-                incidents.forEach(incident => {
-                    incidentsDataCache[incident.id] = incident;
-                    const row = document.createElement('tr');
-                    row.setAttribute('data-incident-id', incident.id);
-                    row.classList.add('cursor-pointer', 'hover:bg-gray-100', 'dark:hover:bg-gray-700');
-
-                    row.addEventListener('click', (event) => {
-                        const clickedRow = event.currentTarget;
-                        const incidentId = clickedRow.getAttribute('data-incident-id');
-                        console.log(`DEBUG: Row clicked! Incident ID: ${incidentId}`);
-                        if (!incidentId) {
-                            console.error("DEBUG: Clicked row is missing data-incident-id attribute!");
-                            return;
-                        }
-                        const incidentData = incidentsDataCache[incidentId];
-                        console.log("DEBUG: Incident data from cache:", incidentData);
-                        if (incidentData) {
-                            ui.openModal(incidentData);
-                        } else {
-                            console.error(`DEBUG: Incident data for ID ${incidentId} not found in cache! Cache content:`, incidentsDataCache);
-                        }
-                    });
-
-                    const severityUpper = incident.severity ? incident.severity.toUpperCase() : '';
-                    if (severityUpper === 'CRITICAL') row.classList.add('bg-red-50', 'dark:bg-red-900/20');
-                    else if (severityUpper === 'ERROR') row.classList.add('bg-orange-50', 'dark:bg-orange-900/20');
-                    else if (severityUpper === 'WARNING') row.classList.add('bg-yellow-50', 'dark:bg-yellow-900/20');
-
-                    const createCell = (content, isHtml = false, allowWrap = false) => {
-                        const cell = document.createElement('td');
-                        cell.className = 'px-4 py-3 text-sm text-gray-700 dark:text-gray-300 align-top';
-                        ui.setText(cell, content, isHtml);
-                        cell.title = cell.textContent;
-                        cell.classList.toggle('whitespace-normal', allowWrap);
-                        cell.classList.toggle('whitespace-nowrap', !allowWrap);
-                        cell.classList.toggle('overflow-hidden', !allowWrap);
-                        cell.classList.toggle('text-ellipsis', !allowWrap);
-                        return cell;
-                    };
-
-                    row.appendChild(createCell(ui.formatVietnameseDateTime(incident.timestamp)));
-                    row.appendChild(createCell(incident.pod_key));
-                    row.appendChild(createCell(ui.createSeverityBadge(incident.severity), true));
-                    row.appendChild(createCell(incident.summary, false, true));
-                    row.appendChild(createCell(incident.initial_reasons, false, true));
-                    incidentsTableBody.appendChild(row);
+        tableBody.innerHTML = '';
+        if (incidents.length === 0) {
+            tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-500">Không tìm thấy sự cố nào khớp.</td></tr>`;
+        } else {
+            incidents.forEach(incident => {
+                incidentsDataCache[incident.id] = incident;
+                const row = document.createElement('tr');
+                row.setAttribute('data-incident-id', incident.id);
+                row.classList.add('cursor-pointer', 'hover:bg-gray-100');
+                row.addEventListener('click', (event) => {
+                    const clickedRow = event.currentTarget;
+                    const incidentId = clickedRow.getAttribute('data-incident-id');
+                    const incidentData = incidentsDataCache[incidentId];
+                    if (incidentData) ui.openModal(incidentData);
+                    else console.error(`Incident data for ID ${incidentId} not found in cache!`);
                 });
-            }
+                const severityUpper = incident.severity ? incident.severity.toUpperCase() : '';
+                if (severityUpper === 'CRITICAL') row.classList.add('bg-red-50');
+                else if (severityUpper === 'ERROR') row.classList.add('bg-orange-50');
+                else if (severityUpper === 'WARNING') row.classList.add('bg-yellow-50');
+                const createCell = (content, isHtml = false, allowWrap = false) => {
+                    const cell = document.createElement('td');
+                    cell.className = 'px-4 py-3 text-sm text-gray-700 align-top';
+                    ui.setText(cell, content, isHtml);
+                    cell.title = cell.textContent;
+                    cell.classList.toggle('whitespace-normal', allowWrap);
+                    cell.classList.toggle('whitespace-nowrap', !allowWrap);
+                    cell.classList.toggle('overflow-hidden', !allowWrap);
+                    cell.classList.toggle('text-ellipsis', !allowWrap);
+                    return cell;
+                };
+                row.appendChild(createCell(ui.formatVietnameseDateTime(incident.timestamp)));
+                row.appendChild(createCell(incident.pod_key));
+                row.appendChild(createCell(ui.createSeverityBadge(incident.severity), true));
+                row.appendChild(createCell(incident.summary, false, true));
+                row.appendChild(createCell(incident.initial_reasons, false, true));
+                tableBody.appendChild(row);
+            });
         }
-
         if (paginationControls) {
             if (totalIncidentPages > 0) {
-                if (paginationInfo) paginationInfo.textContent = `Trang ${pagination.page} / ${totalIncidentPages} (Tổng: ${pagination.total_items})`;
+                if (paginationInfo) ui.setText(paginationInfo, `Trang ${pagination.page} / ${totalIncidentPages} (Tổng: ${pagination.total_items})`);
                 if (prevPageButton) prevPageButton.disabled = pagination.page <= 1;
                 if (nextPageButton) nextPageButton.disabled = pagination.page >= totalIncidentPages;
                 paginationControls.classList.remove('hidden');
@@ -247,7 +278,7 @@ async function loadIncidentsData(forceReload = false) {
         }
     } catch (error) {
         console.error('DEBUG: Failed to load incidents data:', error);
-        if (incidentsTableBody) incidentsTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-red-500">Lỗi tải dữ liệu sự cố: ${error.message}.</td></tr>`;
+        if (tableBody) tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-red-500">Lỗi tải dữ liệu sự cố: ${error.message}.</td></tr>`;
         if (paginationControls) paginationControls.classList.add('hidden');
     } finally {
         ui.hideLoading();
@@ -255,20 +286,220 @@ async function loadIncidentsData(forceReload = false) {
 }
 
 function loadAllSettings() {
-    settings.renderNamespaceList();
-    settings.loadGeneralSettings();
+    // Load only global settings now
     settings.loadTelegramSettings();
     settings.loadAiSettings();
 }
 
+// --- Agent Configuration Handling ---
+
+async function handleConfigureAgentClick(agentId, clusterName) {
+    console.log(`Configure button clicked for agent: ${agentId} (Cluster: ${clusterName})`);
+    if (!agentConfigSection || !configAgentIdSpan) return;
+
+    currentConfiguringAgentId = agentId; // Store the agent ID being configured
+    ui.showLoading();
+    // Reset status messages
+    if(saveAgentGeneralConfigStatus) saveAgentGeneralConfigStatus.classList.add('hidden');
+    if(saveAgentNsConfigStatus) saveAgentNsConfigStatus.classList.add('hidden');
+    // Reset forms to default/empty state before loading
+    resetAgentConfigForms();
+
+
+    // Display agent ID/Cluster Name
+    ui.setText(configAgentIdSpan, `${agentId} (${clusterName || 'N/A'})`);
+
+    try {
+        // Fetch agent's current config (general + namespaces)
+        // NOTE: This assumes fetchAgentConfig returns both general and namespace config
+        // Adjust if you have separate endpoints
+        const agentConfig = await api.fetchAgentConfig(agentId);
+        console.log("Fetched agent config:", agentConfig); // DEBUG
+
+        // Populate General Settings Tab
+        if (agentScanIntervalInput) agentScanIntervalInput.value = agentConfig.scan_interval_seconds ?? 30;
+        if (agentRestartThresholdInput) agentRestartThresholdInput.value = agentConfig.restart_count_threshold ?? 5;
+        if (agentLokiScanLevelSelect) agentLokiScanLevelSelect.value = agentConfig.loki_scan_min_level ?? 'INFO';
+
+        // Populate Namespaces Tab
+        await renderAgentNamespaceList(agentConfig.monitored_namespaces || []);
+
+        // Show the config section and set the default tab
+        agentConfigSection.classList.remove('hidden');
+        switchAgentConfigTab('agent-general'); // Default to general tab
+
+    } catch (error) {
+        console.error(`Error loading configuration for agent ${agentId}:`, error);
+        alert(`Không thể tải cấu hình cho agent ${agentId}: ${error.message}`);
+        // Optionally hide the section again on error
+        // agentConfigSection.classList.add('hidden');
+        // currentConfiguringAgentId = null;
+    } finally {
+        ui.hideLoading();
+    }
+}
+
+function resetAgentConfigForms() {
+     // Reset general tab inputs
+     if (agentScanIntervalInput) agentScanIntervalInput.value = '30'; // Default value
+     if (agentRestartThresholdInput) agentRestartThresholdInput.value = '5'; // Default value
+     if (agentLokiScanLevelSelect) agentLokiScanLevelSelect.value = 'INFO'; // Default value
+
+     // Reset namespace tab
+     if (agentNamespaceListDiv) agentNamespaceListDiv.innerHTML = '';
+     if (agentNamespaceLoadingText) {
+         ui.setText(agentNamespaceLoadingText, 'Chọn agent để tải namespace...');
+         agentNamespaceLoadingText.classList.remove('hidden');
+     }
+ }
+
+
+async function renderAgentNamespaceList(monitoredNamespaces = []) {
+    if (!agentNamespaceListDiv || !agentNamespaceLoadingText) return;
+
+    agentNamespaceListDiv.innerHTML = ''; // Clear previous list
+    agentNamespaceLoadingText.classList.remove('hidden');
+    ui.setText(agentNamespaceLoadingText, 'Đang tải danh sách namespace khả dụng...');
+
+    try {
+        const availableNamespaces = await api.fetchAvailableNamespaces();
+        agentNamespaceLoadingText.classList.add('hidden');
+
+        if (availableNamespaces.length === 0) {
+            agentNamespaceListDiv.innerHTML = `<p class="text-gray-500 col-span-full text-center py-4">Không tìm thấy namespace nào trong cluster.</p>`;
+        } else {
+            availableNamespaces.forEach(ns => {
+                const isChecked = monitoredNamespaces.includes(ns);
+                const div = document.createElement('div');
+                div.className = 'namespace-item text-sm flex items-center';
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = `agent-ns-${ns}`; // Unique ID for agent config
+                checkbox.value = ns;
+                checkbox.checked = isChecked;
+                checkbox.className = 'form-checkbox h-4 w-4 text-indigo-600 transition duration-150 ease-in-out rounded border-gray-300 focus:ring-indigo-500';
+                const label = document.createElement('label');
+                label.htmlFor = `agent-ns-${ns}`;
+                label.textContent = ns;
+                label.className = 'ml-2 text-gray-700 cursor-pointer select-none';
+                div.appendChild(checkbox);
+                div.appendChild(label);
+                agentNamespaceListDiv.appendChild(div);
+            });
+        }
+    } catch (error) {
+        console.error("Error rendering agent namespace list:", error);
+        agentNamespaceListDiv.innerHTML = `<p class="text-red-500 col-span-full text-center py-4">Lỗi hiển thị danh sách namespace.</p>`;
+        agentNamespaceLoadingText.classList.add('hidden');
+    }
+}
+
+function switchAgentConfigTab(targetTabId) {
+    agentConfigTabs.forEach(tab => {
+        const isTarget = tab.getAttribute('data-tab') === targetTabId;
+        tab.classList.toggle('border-indigo-500', isTarget);
+        tab.classList.toggle('text-indigo-600', isTarget);
+        tab.classList.toggle('border-transparent', !isTarget);
+        tab.classList.toggle('text-gray-500', !isTarget);
+        tab.classList.toggle('hover:text-gray-700', !isTarget);
+        tab.classList.toggle('hover:border-gray-300', !isTarget);
+    });
+
+    agentConfigTabContents.forEach(content => {
+        content.classList.toggle('hidden', content.id !== `${targetTabId}-tab`);
+    });
+}
+
+async function handleSaveAgentGeneralConfig() {
+    if (!currentConfiguringAgentId || !saveAgentGeneralConfigButton || !saveAgentGeneralConfigStatus) return;
+
+    ui.showLoading();
+    saveAgentGeneralConfigButton.disabled = true;
+    ui.showStatusMessage(saveAgentGeneralConfigStatus, 'Đang lưu...', 'info');
+
+    let configData;
+    try {
+        // --- Validation ---
+        const scanInterval = parseInt(agentScanIntervalInput?.value ?? '0');
+        const restartThreshold = parseInt(agentRestartThresholdInput?.value ?? '0');
+        const scanLevel = agentLokiScanLevelSelect?.value ?? 'INFO';
+
+        if (isNaN(scanInterval) || scanInterval < 10) throw new Error("Tần suất quét phải là số >= 10.");
+        if (isNaN(restartThreshold) || restartThreshold < 1) throw new Error("Ngưỡng khởi động lại phải là số >= 1.");
+        // --- End Validation ---
+
+        configData = {
+            scan_interval_seconds: scanInterval,
+            restart_count_threshold: restartThreshold,
+            loki_scan_min_level: scanLevel,
+        };
+
+        await api.saveAgentGeneralConfig(currentConfiguringAgentId, configData);
+        ui.showStatusMessage(saveAgentGeneralConfigStatus, 'Đã lưu thành công!', 'success');
+
+    } catch (error) {
+        console.error(`Error saving general config for agent ${currentConfiguringAgentId}:`, error);
+        if (error.message.includes("phải là số")) {
+             alert(`Lỗi dữ liệu nhập: ${error.message}`);
+             ui.showStatusMessage(saveAgentGeneralConfigStatus, '', 'info'); // Clear status
+             if(saveAgentGeneralConfigStatus) saveAgentGeneralConfigStatus.classList.add('hidden');
+        } else {
+             ui.showStatusMessage(saveAgentGeneralConfigStatus, `Lỗi: ${error.message}`, 'error');
+        }
+    } finally {
+        ui.hideLoading();
+        saveAgentGeneralConfigButton.disabled = false;
+        // Hide status message only if it wasn't a validation alert
+        if (saveAgentGeneralConfigStatus && !saveAgentGeneralConfigStatus.classList.contains('hidden') && !alert.caller) {
+            ui.hideStatusMessage(saveAgentGeneralConfigStatus);
+        }
+    }
+}
+
+async function handleSaveAgentNamespaces() {
+    if (!currentConfiguringAgentId || !saveAgentNsConfigButton || !saveAgentNsConfigStatus || !agentNamespaceListDiv) return;
+
+    ui.showLoading();
+    saveAgentNsConfigButton.disabled = true;
+    ui.showStatusMessage(saveAgentNsConfigStatus, 'Đang lưu...', 'info');
+
+    const selectedNamespaces = [];
+    agentNamespaceListDiv.querySelectorAll('input[type="checkbox"]:checked').forEach(checkbox => {
+        selectedNamespaces.push(checkbox.value);
+    });
+
+    try {
+        await api.saveAgentMonitoredNamespaces(currentConfiguringAgentId, selectedNamespaces);
+        ui.showStatusMessage(saveAgentNsConfigStatus, 'Đã lưu thành công!', 'success');
+    } catch (error) {
+        console.error(`Error saving namespaces for agent ${currentConfiguringAgentId}:`, error);
+        ui.showStatusMessage(saveAgentNsConfigStatus, `Lỗi: ${error.message}`, 'error');
+    } finally {
+        ui.hideLoading();
+        saveAgentNsConfigButton.disabled = false;
+        ui.hideStatusMessage(saveAgentNsConfigStatus);
+    }
+}
+
+function handleCloseAgentConfig() {
+    if (agentConfigSection) {
+        agentConfigSection.classList.add('hidden');
+    }
+    currentConfiguringAgentId = null; // Reset the currently configured agent
+}
+
+
 // === Event Listener Setup ===
 document.addEventListener('DOMContentLoaded', () => {
+    // Set default date range for Incidents tab
     const today = new Date();
     currentIncidentStartDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0, 0)).toISOString();
     currentIncidentEndDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 23, 59, 59, 999)).toISOString();
 
+    // Initial section load
     ui.setActiveSection('dashboard', loadActiveSectionData);
 
+    // Sidebar navigation
     sidebarItems.forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
@@ -277,6 +508,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // Incident Filters & Pagination (Keep as is)
     if (filterButton) filterButton.addEventListener('click', () => {
         currentPodFilter = podFilterInput?.value || '';
         currentSeverityFilter = severityFilterSelect?.value || '';
@@ -285,7 +517,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     if (podFilterInput) podFilterInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') filterButton?.click(); });
     if (refreshIncidentsButton) refreshIncidentsButton.addEventListener('click', () => { loadIncidentsData(true); });
-
     if (prevPageButton) prevPageButton.addEventListener('click', () => {
         if (currentIncidentPage > 1) { currentIncidentPage--; loadIncidentsData(true); }
     });
@@ -293,42 +524,56 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentIncidentPage < totalIncidentPages) { currentIncidentPage++; loadIncidentsData(true); }
     });
 
+    // Dashboard Time Range Buttons (Keep as is)
     timeRangeButtons.forEach(button => {
         button.addEventListener('click', () => {
             const days = parseInt(button.getAttribute('data-days'));
             currentStatsDays = days;
-
             const endDate = new Date(); const startDate = new Date();
             startDate.setDate(endDate.getDate() - days + 1);
             currentIncidentStartDate = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate(), 0, 0, 0, 0)).toISOString();
             currentIncidentEndDate = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate(), 23, 59, 59, 999)).toISOString();
-
             loadDashboardData();
-
             if (document.getElementById('incidents-content')?.classList.contains('hidden') === false) {
                 currentIncidentPage = 1; loadIncidentsData(true);
             }
-
             timeRangeButtons.forEach(btn => {
                  btn.classList.remove('bg-blue-500', 'text-white');
-                 btn.classList.add('bg-gray-300', 'dark:bg-gray-600', 'text-gray-700', 'dark:text-gray-200');
+                 btn.classList.add('bg-gray-300', 'text-gray-700');
                  btn.disabled = false;
             });
             button.classList.add('bg-blue-500', 'text-white');
-            button.classList.remove('bg-gray-300', 'dark:bg-gray-600', 'text-gray-700', 'dark:text-gray-200');
+            button.classList.remove('bg-gray-300', 'text-gray-700');
             button.disabled = true;
         });
-         if (button.getAttribute('data-days') === '1') button.click();
-         else button.disabled = false;
+         if (button.getAttribute('data-days') === '1') { button.click(); }
+         else { button.disabled = false; }
     });
 
-    if (saveNsConfigButton) saveNsConfigButton.addEventListener('click', settings.saveMonitoredNamespaces);
-    if (saveGeneralConfigButton) saveGeneralConfigButton.addEventListener('click', settings.saveGeneralSettings);
+    // Global Settings Save Buttons (Telegram, AI)
     if (saveTelegramConfigButton) saveTelegramConfigButton.addEventListener('click', settings.saveTelegramSettings);
     if (saveAiConfigButton) saveAiConfigButton.addEventListener('click', settings.saveAiSettings);
 
+    // Global Settings Toggles
     if (enableAiToggle) enableAiToggle.addEventListener('change', settings.handleAiToggleChange);
 
+    // Agent Configuration Event Listeners
+    if (agentConfigTabs) {
+        agentConfigTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const targetTabId = tab.getAttribute('data-tab');
+                if (targetTabId) {
+                    switchAgentConfigTab(targetTabId);
+                }
+            });
+        });
+    }
+    if (saveAgentGeneralConfigButton) saveAgentGeneralConfigButton.addEventListener('click', handleSaveAgentGeneralConfig);
+    if (saveAgentNsConfigButton) saveAgentNsConfigButton.addEventListener('click', handleSaveAgentNamespaces);
+    if (closeAgentConfigButton) closeAgentConfigButton.addEventListener('click', handleCloseAgentConfig);
+
+
+    // Modal Handling (Keep as is)
     if (modalCloseButton) modalCloseButton.addEventListener('click', ui.closeModal);
     if (modalOverlay) modalOverlay.addEventListener('click', (event) => { if (event.target === modalOverlay) ui.closeModal(); });
     document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && document.getElementById('incident-modal')?.classList.contains('modal-visible')) ui.closeModal(); });

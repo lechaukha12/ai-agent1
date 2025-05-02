@@ -1,3 +1,4 @@
+# ai-agent1/obsengine/obsengine_config.py
 import os
 import time
 import json
@@ -82,9 +83,18 @@ def get_config(force_refresh=False):
         db_path_for_load = db_path_env or DEFAULT_DB_PATH # Use env path if set, else default
         config_from_db = {}
         if db_manager:
-            config_from_db = db_manager.load_all_config(db_path_for_load)
-            if not config_from_db:
-                logging.warning("[Config Manager - ObsEngine] Failed to load config from DB or DB is empty. Using defaults/env vars.")
+            try:
+                # --- FIX: Changed load_all_config to load_all_global_config ---
+                config_from_db = db_manager.load_all_global_config(db_path_for_load)
+                # -------------------------------------------------------------
+                if not config_from_db:
+                    logging.warning("[Config Manager - ObsEngine] Failed to load config from DB or DB is empty. Using defaults/env vars.")
+            except AttributeError:
+                 logging.critical("[Config Manager - ObsEngine] db_manager module is missing the 'load_all_global_config' function! Using defaults/env vars.", exc_info=True)
+                 config_from_db = {} # Ensure it's an empty dict on error
+            except Exception as db_load_err:
+                 logging.error(f"[Config Manager - ObsEngine] Error loading config from DB: {db_load_err}. Using defaults/env vars.", exc_info=True)
+                 config_from_db = {} # Ensure it's an empty dict on error
         else:
             logging.error("[Config Manager - ObsEngine] db_manager not available. Cannot load settings from database. Using defaults/env vars.")
 
@@ -124,8 +134,8 @@ def get_config(force_refresh=False):
             # Use DB value if present and valid, otherwise use default constant
             cooldown_minutes = int(config_from_db.get('alert_cooldown_minutes', DEFAULT_ALERT_COOLDOWN_MINUTES))
             processed_config['alert_cooldown_minutes'] = cooldown_minutes if cooldown_minutes >= 0 else DEFAULT_ALERT_COOLDOWN_MINUTES
-        except ValueError:
-            logging.warning(f"Invalid alert_cooldown_minutes value in DB. Using default: {DEFAULT_ALERT_COOLDOWN_MINUTES}")
+        except (ValueError, TypeError): # Catch TypeError if value is None
+            logging.warning(f"Invalid or missing alert_cooldown_minutes value in DB. Using default: {DEFAULT_ALERT_COOLDOWN_MINUTES}")
             processed_config['alert_cooldown_minutes'] = DEFAULT_ALERT_COOLDOWN_MINUTES
 
         # Stats Update Interval (Typically from Env Var or Default Constant)

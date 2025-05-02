@@ -1,13 +1,15 @@
 <section id="incidents-content" class="content-section hidden">
     <header class="mb-6">
-       <h2 class="text-2xl font-semibold text-gray-800 dark:text-gray-100">Incidents</h2>
-       <p class="text-sm text-gray-500 dark:text-gray-400">Danh sách các sự cố được phát hiện.</p>
+       <h2 class="text-2xl font-semibold text-gray-800">Incidents</h2>
+       <p class="text-sm text-gray-500">Danh sách các sự cố được phát hiện.</p>
    </header>
-   <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 p-4 md:p-6">
+   <div class="bg-white rounded-lg shadow border border-gray-200 p-4 md:p-6">
        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-5 gap-4">
-           <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-200 flex-shrink-0">Danh sách Sự cố</h3>
+           <h3 class="text-xl font-semibold text-gray-700 flex-shrink-0">Danh sách Sự cố</h3>
            <div class="flex flex-wrap items-center gap-2 md:gap-3 w-full md:w-auto">
-               <input type="text" id="pod-filter" placeholder="Lọc Pod/Namespace..." class="form-input px-3 py-1.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-sm flex-grow md:flex-grow-0"> <select id="severity-filter" class="form-select px-3 py-1.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-sm appearance-none pr-8"> <option value="">Tất cả Mức độ</option>
+               <input type="text" id="pod-filter" placeholder="Lọc Pod/Namespace..." class="form-input px-3 py-1.5 border border-gray-300 bg-white text-gray-900 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-sm flex-grow md:flex-grow-0">
+               <select id="severity-filter" class="form-select px-3 py-1.5 border border-gray-300 bg-white text-gray-900 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-sm appearance-none pr-8">
+                   <option value="">Tất cả Mức độ</option>
                    <option value="INFO">INFO</option>
                    <option value="WARNING">WARNING</option>
                    <option value="ERROR">ERROR</option>
@@ -21,25 +23,26 @@
            </div>
        </div>
        <div class="overflow-x-auto">
-           <table id="incidents-table" class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-               <thead class="bg-gray-50 dark:bg-gray-700">
+           <table id="incidents-table" class="min-w-full divide-y divide-gray-200">
+               <thead class="bg-gray-50">
                    <tr>
-                       <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Thời gian</th>
-                       <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Pod</th>
-                       <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Mức độ</th>
-                       <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Tóm tắt</th>
-                       <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Lý do phát hiện</th>
+                       <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Thời gian</th>
+                       <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pod</th>
+                       <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Mức độ</th>
+                       <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tóm tắt</th>
+                       <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lý do phát hiện</th>
                    </tr>
                </thead>
-               <tbody id="incidents-table-body" class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                   <tr><td colspan="5" class="text-center py-6 text-gray-500 dark:text-gray-400">Đang tải dữ liệu...</td></tr>
+               <tbody id="incidents-table-body" class="bg-white divide-y divide-gray-200">
+                   <tr><td colspan="5" class="text-center py-6 text-gray-500">Đang tải dữ liệu...</td></tr>
                </tbody>
            </table>
        </div>
-       <div id="pagination-controls" class="mt-4 flex justify-between items-center text-sm text-gray-600 dark:text-gray-400">
+       <div id="pagination-controls" class="mt-4 flex justify-between items-center text-sm text-gray-600">
            <span id="pagination-info"></span>
            <div class="flex space-x-2">
-               <button id="prev-page" class="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-md text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed">&lt; Trước</button> <button id="next-page" class="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-md text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed">Sau &gt;</button>
+               <button id="prev-page" class="px-3 py-1 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">&lt; Trước</button>
+               <button id="next-page" class="px-3 py-1 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">Sau &gt;</button>
            </div>
        </div>
    </div>

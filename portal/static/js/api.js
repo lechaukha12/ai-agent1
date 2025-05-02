@@ -7,7 +7,6 @@
  */
 export async function fetchStats(days = 1) {
     try {
-        // Calls the BE API, which in turn calls the ObsEngine API
         const response = await fetch(`/api/stats?days=${days}`);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -34,7 +33,6 @@ export async function fetchStats(days = 1) {
  */
 export async function fetchIncidents(page = 1, podFilter = '', severityFilter = '', startDate = null, endDate = null) {
     try {
-        // Calls the BE API, which calls the ObsEngine API
         let url = `/api/incidents?limit=20&page=${page}&pod=${encodeURIComponent(podFilter)}&severity=${encodeURIComponent(severityFilter)}`;
         if (startDate) {
             url += `&start_date=${startDate}`;
@@ -64,17 +62,16 @@ export async function fetchIncidents(page = 1, podFilter = '', severityFilter = 
 }
 
 /**
- * Fetches the list of available namespaces.
+ * Fetches the list of available namespaces (still needed for selection).
  * @returns {Promise<string[]>} - A promise that resolves with an array of namespace names or rejects with an error.
  */
 export async function fetchAvailableNamespaces() {
     try {
-        // Calls the BE API, which calls the ObsEngine API
         const response = await fetch('/api/namespaces');
         if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
         const data = await response.json();
         if (data.error) { throw new Error(`API Error: ${data.error}`); }
-        return Array.isArray(data) ? data : []; // Ensure it returns an array
+        return Array.isArray(data) ? data : [];
     } catch (error) {
         console.error('Lỗi khi lấy danh sách namespace có sẵn:', error);
         throw error;
@@ -82,108 +79,28 @@ export async function fetchAvailableNamespaces() {
 }
 
 /**
- * Fetches the list of currently monitored namespaces.
- * @returns {Promise<string[]>} - A promise that resolves with an array of monitored namespace names or rejects with an error.
+ * Fetches the status of active agents.
+ * @returns {Promise<object>} - A promise that resolves with { active_agents: [] } or rejects with an error.
  */
-export async function fetchMonitoredNamespaces() {
-     try {
-        // Calls the BE API, which calls the ObsEngine API
-        const response = await fetch('/api/config/monitored_namespaces');
-        if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
-         const data = await response.json();
-         if (data.error) { throw new Error(`API Error: ${data.error}`); }
-         // Ensure data is an array, handle potential stringified JSON from older versions if necessary
-         let monitored = [];
-         if (Array.isArray(data)) {
-             monitored = data;
-         } else if (typeof data === 'string') {
-             try {
-                 monitored = JSON.parse(data);
-                 if (!Array.isArray(monitored)) monitored = [];
-             } catch (e) {
-                 console.warn("Could not parse monitored_namespaces string as JSON:", data);
-                 monitored = [];
-             }
-         }
-         return monitored;
-    } catch (error) {
-        console.error('Lỗi khi lấy danh sách namespace đang giám sát:', error);
-        throw error;
-    }
-}
-
-/**
- * Saves the list of monitored namespaces.
- * @param {string[]} selectedNamespaces - An array of namespace names to monitor.
- * @returns {Promise<object>} - A promise that resolves with the success message or rejects with an error.
- */
-export async function saveMonitoredNamespacesApi(selectedNamespaces) {
+export async function fetchAgentStatus() {
     try {
-        // Calls the BE API, which calls the ObsEngine API
-        const response = await fetch('/api/config/monitored_namespaces', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ namespaces: selectedNamespaces }),
-        });
-        const result = await response.json();
-        if (!response.ok || result.error) {
-            throw new Error(result.error || `HTTP error! status: ${response.status}`);
+        const response = await fetch('/api/agents/status');
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
-        console.log("Namespace config saved via API:", selectedNamespaces);
-        return result;
+        const data = await response.json();
+        if (data.error) {
+            throw new Error(`API Error: ${data.error}`);
+        }
+        return data; // Expected format: { active_agents: [...] }
     } catch (error) {
-        console.error('Lỗi khi lưu cấu hình namespace qua API:', error);
+        console.error('Error fetching agent status:', error);
         throw error;
     }
 }
 
-/**
- * Fetches the general agent configuration.
- * @returns {Promise<object>} - A promise that resolves with the config object or rejects with an error.
- */
-export async function fetchGeneralConfigApi() {
-    try {
-        // Calls the BE API, which calls the ObsEngine API
-        const response = await fetch('/api/config/general');
-        if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
-        const config = await response.json();
-        if (config.error) { throw new Error(`API Error: ${config.error}`); }
-        // Defaults might be handled by BE/ObsEngine now, but keep client-side defaults as fallback
-        config.scan_interval_seconds = config.scan_interval_seconds || 30;
-        config.restart_count_threshold = config.restart_count_threshold || 5;
-        config.loki_scan_min_level = config.loki_scan_min_level || 'INFO';
-        config.alert_cooldown_minutes = config.alert_cooldown_minutes || 30;
-        // Use the string version if available, otherwise fallback
-        config.alert_severity_levels = config.alert_severity_levels_str || config.alert_severity_levels || 'WARNING,ERROR,CRITICAL';
-        return config;
-    } catch (error) {
-        console.error('Lỗi khi lấy cấu hình chung qua API:', error);
-        throw error;
-    }
-}
 
-/**
- * Saves the general agent configuration.
- * @param {object} configData - The configuration data object.
- * @returns {Promise<object>} - A promise that resolves with the success message or rejects with an error.
- */
-export async function saveGeneralConfigApi(configData) {
-    try {
-        // Calls the BE API, which calls the ObsEngine API
-        const response = await fetch('/api/config/general', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(configData),
-        });
-        const result = await response.json();
-        if (!response.ok || result.error) { throw new Error(result.error || `HTTP error! status: ${response.status}`); }
-        console.log("General config saved via API:", configData);
-        return result;
-    } catch (error) {
-        console.error('Lỗi khi lưu cấu hình chung qua API:', error);
-        throw error;
-    }
-}
+// --- Global Config APIs (Telegram & AI remain global) ---
 
 /**
  * Fetches the Telegram configuration (Chat ID and token existence).
@@ -191,12 +108,10 @@ export async function saveGeneralConfigApi(configData) {
  */
 export async function fetchTelegramConfigApi() {
     try {
-        // Calls the BE API, which calls the ObsEngine API
-        const response = await fetch('/api/config/telegram');
+        const response = await fetch('/api/config/telegram'); // Assumes GET is handled correctly now
         if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
         const config = await response.json();
         if (config.error) { throw new Error(`API Error: ${config.error}`); }
-        // Ensure boolean value for toggle
         config.enable_telegram_alerts = config.enable_telegram_alerts === true;
         return config;
     } catch (error) {
@@ -212,7 +127,6 @@ export async function fetchTelegramConfigApi() {
  */
 export async function saveTelegramConfigApi(configData) {
     try {
-        // Calls the BE API, which calls the ObsEngine API
         const response = await fetch('/api/config/telegram', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -234,12 +148,10 @@ export async function saveTelegramConfigApi(configData) {
  */
 export async function fetchAiConfigApi() {
      try {
-        // Calls the BE API, which calls the ObsEngine API
-         const response = await fetch('/api/config/ai');
+         const response = await fetch('/api/config/ai'); // Assumes GET is handled correctly now
          if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
          const config = await response.json();
          if (config.error) { throw new Error(`API Error: ${config.error}`); }
-         // Ensure boolean value for toggle
          config.enable_ai_analysis = config.enable_ai_analysis === true;
          config.ai_provider = config.ai_provider || 'none';
          config.ai_model_identifier = config.ai_model_identifier || '';
@@ -257,7 +169,6 @@ export async function fetchAiConfigApi() {
  */
 export async function saveAiConfigApi(configData) {
     try {
-        // Calls the BE API, which calls the ObsEngine API
         const response = await fetch('/api/config/ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -273,26 +184,105 @@ export async function saveAiConfigApi(configData) {
     }
 }
 
-// --- ADDED: Function to fetch Agent Status ---
+
+// --- NEW Agent-Specific Config APIs ---
+
 /**
- * Fetches the status of active agents.
- * @returns {Promise<object>} - A promise that resolves with { active_agents: [] } or rejects with an error.
+ * Fetches the configuration for a specific agent.
+ * @param {string} agentId - The ID of the agent.
+ * @returns {Promise<object>} - A promise that resolves with the agent's config object or rejects with an error.
+ * @throws {Error} If the API call fails.
  */
-export async function fetchAgentStatus() {
+export async function fetchAgentConfig(agentId) {
+    // !! Backend endpoint needs to be created !!
+    const endpoint = `/api/agents/${encodeURIComponent(agentId)}/config`;
+    console.log(`Fetching config for agent: ${agentId}`); // DEBUG
     try {
-        // Calls the BE API, which calls the ObsEngine API
-        const response = await fetch('/api/agents/status');
+        const response = await fetch(endpoint);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        const data = await response.json();
-        if (data.error) {
-            throw new Error(`API Error: ${data.error}`);
+        const config = await response.json();
+        if (config.error) {
+            throw new Error(`API Error: ${config.error}`);
         }
-        return data; // Expected format: { active_agents: [...] }
+        // Provide default values if specific keys are missing from the response
+        return {
+            scan_interval_seconds: config.scan_interval_seconds ?? 30,
+            restart_count_threshold: config.restart_count_threshold ?? 5,
+            loki_scan_min_level: config.loki_scan_min_level ?? 'INFO',
+            monitored_namespaces: Array.isArray(config.monitored_namespaces) ? config.monitored_namespaces : [],
+            // Add other agent-specific fields here as needed
+        };
     } catch (error) {
-        console.error('Error fetching agent status:', error);
-        throw error;
+        console.error(`Error fetching config for agent ${agentId}:`, error);
+        throw error; // Re-throw the error for the caller to handle
     }
 }
-// --------------------------------------------
+
+/**
+ * Saves the general configuration for a specific agent.
+ * @param {string} agentId - The ID of the agent.
+ * @param {object} configData - Object containing general settings like { scan_interval_seconds, restart_count_threshold, loki_scan_min_level }.
+ * @returns {Promise<object>} - A promise that resolves with the success message or rejects with an error.
+ * @throws {Error} If the API call fails.
+ */
+export async function saveAgentGeneralConfig(agentId, configData) {
+    // !! Backend endpoint needs to be created !!
+    const endpoint = `/api/agents/${encodeURIComponent(agentId)}/config/general`;
+    console.log(`Saving general config for agent ${agentId}:`, configData); // DEBUG
+    try {
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(configData),
+        });
+        const result = await response.json();
+        if (!response.ok || result.error) {
+            throw new Error(result.error || `HTTP error! status: ${response.status}`);
+        }
+        console.log(`General config saved for agent ${agentId}`);
+        return result;
+    } catch (error) {
+        console.error(`Error saving general config for agent ${agentId}:`, error);
+        throw error; // Re-throw the error
+    }
+}
+
+/**
+ * Saves the monitored namespaces for a specific agent.
+ * @param {string} agentId - The ID of the agent.
+ * @param {string[]} namespaces - An array of namespace names to monitor.
+ * @returns {Promise<object>} - A promise that resolves with the success message or rejects with an error.
+ * @throws {Error} If the API call fails.
+ */
+export async function saveAgentMonitoredNamespaces(agentId, namespaces) {
+    // !! Backend endpoint needs to be created !!
+    const endpoint = `/api/agents/${encodeURIComponent(agentId)}/config/namespaces`;
+     console.log(`Saving namespaces for agent ${agentId}:`, namespaces); // DEBUG
+    try {
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            // Ensure the payload matches what the backend expects, e.g., { namespaces: [...] }
+            body: JSON.stringify({ namespaces: namespaces }),
+        });
+        const result = await response.json();
+        if (!response.ok || result.error) {
+            throw new Error(result.error || `HTTP error! status: ${response.status}`);
+        }
+        console.log(`Namespaces saved for agent ${agentId}`);
+        return result;
+    } catch (error) {
+        console.error(`Error saving namespaces for agent ${agentId}:`, error);
+        throw error; // Re-throw the error
+    }
+}
+
+// --- Removed/Deprecated Global Config APIs ---
+/*
+export async function fetchGeneralConfigApi() { ... } // Removed
+export async function saveGeneralConfigApi(configData) { ... } // Removed
+export async function fetchMonitoredNamespaces() { ... } // Removed
+export async function saveMonitoredNamespacesApi(selectedNamespaces) { ... } // Removed
+*/
