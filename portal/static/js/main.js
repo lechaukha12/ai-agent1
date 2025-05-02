@@ -103,24 +103,45 @@ async function loadAgentStatus() {
 
             const createCell = (content, isHtml = false) => {
                 const cell = document.createElement('td');
-                cell.className = 'px-4 py-3 text-sm text-gray-700 align-middle';
+                cell.className = 'px-4 py-3 text-sm text-gray-700 align-middle'; // Use align-middle
                 ui.setText(cell, content, isHtml);
                 return cell;
             };
 
-            // Add "Configure" button
-            const actionCell = createCell('', true);
+            // --- FIX START: Improve Action Cell Layout ---
+            const actionCell = document.createElement('td');
+            actionCell.className = 'px-4 py-3 text-sm text-gray-700 align-middle'; // Match other cells
+
+            const actionContainer = document.createElement('div');
+            actionContainer.className = 'flex items-center space-x-2'; // Use flexbox for alignment and spacing
+
+            const agentVersionText = agent.agent_version || 'N/A';
+
+            // Create Configure button
             const configButton = document.createElement('button');
             configButton.textContent = 'Cấu hình';
-            configButton.className = 'text-indigo-600 hover:text-indigo-900 hover:underline text-xs font-medium';
+            configButton.className = 'text-indigo-600 hover:text-indigo-900 hover:underline text-xs font-medium whitespace-nowrap'; // Prevent button text wrapping
             configButton.onclick = () => handleConfigureAgentClick(agent.agent_id, agent.cluster_name); // Pass agent_id and cluster_name
-            actionCell.appendChild(configButton);
+
+            // Add N/A text only if version is N/A (Optional, adjust if needed)
+            // If you always want N/A if version is missing, keep this check.
+            // If you only want the button, remove the check and the span creation.
+            // if (agentVersionText === 'N/A') {
+            //     const naSpan = document.createElement('span');
+            //     naSpan.className = 'text-gray-400 italic text-xs'; // Style for N/A
+            //     naSpan.textContent = 'N/A';
+            //     actionContainer.appendChild(naSpan);
+            // }
+
+            actionContainer.appendChild(configButton); // Add the button
+            actionCell.appendChild(actionContainer); // Add the container to the cell
+            // --- FIX END ---
 
             row.appendChild(createCell(`${agent.agent_id || 'N/A'} / ${agent.cluster_name || 'N/A'}`));
             row.appendChild(createCell(`<span class="severity-badge severity-info">Active</span>`, true));
             row.appendChild(createCell(ui.formatVietnameseDateTime(agent.last_seen_timestamp)));
-            row.appendChild(createCell(agent.agent_version || 'N/A'));
-            row.appendChild(actionCell); // Add the action cell
+            row.appendChild(createCell(agentVersionText)); // Display version in its own cell
+            row.appendChild(actionCell); // Add the improved action cell
 
             agentTableBody.appendChild(row);
         });
