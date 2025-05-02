@@ -4,11 +4,12 @@ const loadingSpinner = document.getElementById('loading-spinner');
 const loadingOverlay = document.getElementById('loading-overlay');
 const sidebarItems = document.querySelectorAll('.sidebar-item');
 const contentSections = document.querySelectorAll('.content-section');
+// Incident Modal Elements
 const incidentModal = document.getElementById('incident-modal');
-const modalOverlay = document.querySelector('.modal-overlay');
+const modalOverlay = document.querySelector('.modal-overlay'); // Generic overlay selector might need adjustment if multiple modals use different overlays
 const modalTimestamp = document.getElementById('modal-timestamp');
 const modalPodKey = document.getElementById('modal-pod-key');
-const modalSeverity = document.getElementById('modal-severity'); // Corrected variable name
+const modalSeverity = document.getElementById('modal-severity');
 const modalInitialReasons = document.getElementById('modal-initial-reasons');
 const modalSummary = document.getElementById('modal-summary');
 const modalRootCause = document.getElementById('modal-root-cause');
@@ -17,8 +18,10 @@ const modalSampleLogs = document.getElementById('modal-sample-logs');
 const modalK8sContext = document.getElementById('modal-k8s-context');
 const modalInputPrompt = document.getElementById('modal-input-prompt');
 const modalRawAiResponse = document.getElementById('modal-raw-ai-response');
+// User Management Elements
 const usersTableBody = document.getElementById('users-table-body');
 const usersListErrorElem = document.getElementById('users-list-error');
+// Edit User Modal Elements
 const editUserModal = document.getElementById('edit-user-modal');
 const editUserModalCloseButton = document.getElementById('edit-user-modal-close-button');
 const editUserForm = document.getElementById('edit-user-form');
@@ -28,18 +31,24 @@ const editFullnameInput = document.getElementById('edit-fullname');
 const editRoleSelect = document.getElementById('edit-role');
 const editUserStatus = document.getElementById('edit-user-status');
 const saveUserChangesButton = document.getElementById('save-user-changes-button');
+// --- ADDED: Create User Modal Elements ---
+const createUserModal = document.getElementById('create-user-modal');
+const createUserModalCloseButton = document.getElementById('create-user-modal-close-button');
+const createUserForm = document.getElementById('create-user-form'); // Already existed, but good to have ref
+const createUserStatus = document.getElementById('create-user-status'); // Already existed
+const passwordMatchError = document.getElementById('password-match-error'); // Already existed
+// --- END ADDED ---
+// Agent Monitoring Elements
 const agentStatusTableBody = document.getElementById('agent-status-table-body');
 const agentStatusErrorElem = document.getElementById('agent-status-error');
-// --- ADDED: Elements for cluster info in agent config section ---
 const configAgentK8sVersionSpan = document.getElementById('config-agent-k8s-version');
 const configAgentNodeCountSpan = document.getElementById('config-agent-node-count');
-// --- END ADDED ---
-// Agent General Config Form Elements (already defined in main.js, but good to have refs here too if needed)
 const agentScanIntervalInput = document.getElementById('agent-scan-interval');
 const agentRestartThresholdInput = document.getElementById('agent-restart-threshold');
 const agentLokiScanLevelSelect = document.getElementById('agent-loki-scan-level');
 
 
+// --- General UI Functions ---
 export function showLoading() {
     if (loadingSpinner) loadingSpinner.classList.remove('hidden');
     if (loadingOverlay) loadingOverlay.classList.remove('hidden');
@@ -119,7 +128,7 @@ export function hideStatusMessage(statusElement, delay = 3000) {
         }, delay);
 }
 
-
+// --- Incident Modal Functions ---
 export function openModal(incidentData) {
     if (!incidentData || !incidentModal) {
         console.error(`DEBUG: Incident data not provided or modal element missing.`);
@@ -160,7 +169,7 @@ export function closeModal() {
     document.body.style.overflow = '';
 }
 
-
+// --- Section Activation ---
 export function setActiveSection(targetId, loadSectionDataCallback) {
     contentSections.forEach(section => {
         section.classList.add('hidden');
@@ -187,7 +196,7 @@ export function setActiveSection(targetId, loadSectionDataCallback) {
     }
 }
 
-// --- MODIFIED: renderAgentStatusTable passes clicked row to callback ---
+// --- Agent Monitoring UI ---
 export function renderAgentStatusTable(agents, configureCallback, currentUserRole) {
     if (!agentStatusTableBody || !agentStatusErrorElem) {
         console.warn("Agent status table elements not found.");
@@ -200,12 +209,12 @@ export function renderAgentStatusTable(agents, configureCallback, currentUserRol
         return;
     }
     agents.forEach(agent => {
-        const row = document.createElement('tr'); // Keep reference to the row
+        const row = document.createElement('tr');
         row.setAttribute('data-agent-id', agent.agent_id);
         const createCell = (content, isHtml = false, cssClass = null) => {
             const cell = document.createElement('td');
             cell.className = 'px-4 py-3 text-sm text-gray-700 align-middle whitespace-nowrap';
-            if(cssClass) cell.classList.add(cssClass); // Add specific class if needed
+            if(cssClass) cell.classList.add(cssClass);
             setText(cell, content, isHtml);
             return cell;
         };
@@ -213,7 +222,6 @@ export function renderAgentStatusTable(agents, configureCallback, currentUserRol
         row.appendChild(createCell(`<span class="severity-badge severity-info">Active</span>`, true));
         row.appendChild(createCell(formatVietnameseDateTime(agent.last_seen_timestamp)));
         row.appendChild(createCell(agent.agent_version || 'N/A'));
-        // Add specific classes to these cells for easier selection later
         row.appendChild(createCell(agent.k8s_version || 'N/A', false, 'agent-k8s-version-cell'));
         row.appendChild(createCell(agent.node_count !== null ? agent.node_count : 'N/A', false, 'agent-node-count-cell'));
         const actionCell = document.createElement('td');
@@ -226,7 +234,6 @@ export function renderAgentStatusTable(agents, configureCallback, currentUserRol
             configButton.className = 'text-indigo-600 hover:text-indigo-900 hover:underline text-xs font-medium whitespace-nowrap configure-agent-btn';
             configButton.onclick = () => {
                 if (typeof configureCallback === 'function') {
-                    // Pass the agent details AND the row element itself
                     configureCallback(agent.agent_id, agent.cluster_name, row);
                 }
             };
@@ -239,7 +246,6 @@ export function renderAgentStatusTable(agents, configureCallback, currentUserRol
         agentStatusTableBody.appendChild(row);
     });
 }
-// --- END MODIFICATION ---
 
 export function showAgentStatusError(message) {
     if (agentStatusTableBody) agentStatusTableBody.innerHTML = '';
@@ -249,7 +255,15 @@ export function showAgentStatusError(message) {
     }
 }
 
+export function populateAgentConfigForm(agentConfig, clusterInfo) {
+    if (agentScanIntervalInput) agentScanIntervalInput.value = agentConfig.scan_interval_seconds ?? 30;
+    if (agentRestartThresholdInput) agentRestartThresholdInput.value = agentConfig.restart_count_threshold ?? 5;
+    if (agentLokiScanLevelSelect) agentLokiScanLevelSelect.value = agentConfig.loki_scan_min_level ?? 'INFO';
+    if (configAgentK8sVersionSpan) setText(configAgentK8sVersionSpan, clusterInfo.k8sVersion || 'N/A');
+    if (configAgentNodeCountSpan) setText(configAgentNodeCountSpan, clusterInfo.nodeCount !== null ? clusterInfo.nodeCount : 'N/A');
+}
 
+// --- User Management UI ---
 export function renderUserTable(users, editUserCallback) {
     if (!usersTableBody) { console.error("User table body element not found."); return; }
     if (usersListErrorElem) usersListErrorElem.classList.add('hidden');
@@ -298,11 +312,34 @@ export function showUserListError(message) {
     }
 }
 
+// --- ADDED: Create User Modal Functions ---
+export function openCreateUserModal() {
+    if (!createUserModal) return;
+    clearCreateUserForm(); // Clear form before opening
+    createUserModal.classList.remove('hidden');
+    createUserModal.classList.add('flex');
+    document.body.style.overflow = 'hidden';
+    // Optionally focus the first field
+    document.getElementById('new-username')?.focus();
+}
+
+export function closeCreateUserModal() {
+    if (!createUserModal) return;
+    createUserModal.classList.add('hidden');
+    createUserModal.classList.remove('flex');
+    document.body.style.overflow = '';
+    // Clear status message in the modal
+    if (createUserStatus) {
+        createUserStatus.classList.add('hidden');
+        createUserStatus.textContent = '';
+    }
+}
+// --- END ADDED ---
+
 export function clearCreateUserForm() {
-    const form = document.getElementById('create-user-form');
-    if (form) { form.reset(); }
-    const passwordError = document.getElementById('password-match-error');
-    if (passwordError) passwordError.classList.add('hidden');
+    if (createUserForm) { createUserForm.reset(); }
+    if (passwordMatchError) passwordMatchError.classList.add('hidden');
+    if (createUserStatus) createUserStatus.classList.add('hidden'); // Also hide status on clear
 }
 
 export function openEditUserModal(userData) {
@@ -331,16 +368,3 @@ export function populateEditUserModal(userData) {
     editFullnameInput.value = userData.fullname || '';
     editRoleSelect.value = userData.role || 'user';
 }
-
-// --- NEW: Function to populate agent config form including read-only cluster info ---
-export function populateAgentConfigForm(agentConfig, clusterInfo) {
-    // Populate editable fields
-    if (agentScanIntervalInput) agentScanIntervalInput.value = agentConfig.scan_interval_seconds ?? 30;
-    if (agentRestartThresholdInput) agentRestartThresholdInput.value = agentConfig.restart_count_threshold ?? 5;
-    if (agentLokiScanLevelSelect) agentLokiScanLevelSelect.value = agentConfig.loki_scan_min_level ?? 'INFO';
-
-    // Populate read-only cluster info fields
-    if (configAgentK8sVersionSpan) setText(configAgentK8sVersionSpan, clusterInfo.k8sVersion || 'N/A');
-    if (configAgentNodeCountSpan) setText(configAgentNodeCountSpan, clusterInfo.nodeCount !== null ? clusterInfo.nodeCount : 'N/A');
-}
-// --- END NEW ---

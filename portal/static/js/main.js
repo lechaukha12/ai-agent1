@@ -52,8 +52,8 @@ const saveAiConfigButton = document.getElementById('save-ai-config-button');
 const enableAiToggle = document.getElementById('enable-ai-toggle');
 // General UI
 const sidebarItems = document.querySelectorAll('.sidebar-item');
-const modalCloseButton = document.getElementById('modal-close-button');
-const modalOverlay = document.querySelector('.modal-overlay');
+const modalCloseButton = document.getElementById('modal-close-button'); // Incident modal close
+const modalOverlay = document.querySelector('.modal-overlay'); // Incident modal overlay
 // Agent Monitoring
 const agentStatusTableBody = document.getElementById('agent-status-table-body');
 const agentStatusErrorElem = document.getElementById('agent-status-error');
@@ -77,14 +77,19 @@ const saveAgentNsConfigStatus = document.getElementById('save-agent-ns-config-st
 // Agent Config Close Button
 const closeAgentConfigButton = document.getElementById('close-agent-config-button');
 // User Management
+const usersTableBody = document.getElementById('users-table-body');
+const usersListErrorElem = document.getElementById('users-list-error');
+// Create User Modal Elements
+const openCreateUserModalButton = document.getElementById('open-create-user-modal-button'); // Button to open the modal
+const createUserModal = document.getElementById('create-user-modal'); // The modal itself
+const createUserModalCloseButton = document.getElementById('create-user-modal-close-button'); // Close button inside the modal
 const createUserForm = document.getElementById('create-user-form');
-const createUserButton = document.getElementById('create-user-button');
+const createUserButton = document.getElementById('create-user-button'); // Submit button inside the modal
 const createUserStatus = document.getElementById('create-user-status');
 const newPasswordInput = document.getElementById('new-password');
 const confirmPasswordInput = document.getElementById('confirm-password');
 const passwordMatchError = document.getElementById('password-match-error');
-const usersTableBody = document.getElementById('users-table-body');
-const usersListErrorElem = document.getElementById('users-list-error');
+// Edit User Modal Elements
 const editUserModal = document.getElementById('edit-user-modal');
 const editUserModalCloseButton = document.getElementById('edit-user-modal-close-button');
 const editUserForm = document.getElementById('edit-user-form');
@@ -104,11 +109,9 @@ async function loadAgentStatus() {
     try {
         const data = await api.fetchAgentStatus();
         const agents = data.active_agents || [];
-        // --- MODIFIED: Pass the clicked row element to the configure callback ---
         ui.renderAgentStatusTable(agents, (agentId, clusterName, clickedRow) => {
             handleConfigureAgentClick(agentId, clusterName, clickedRow);
         }, currentUserRole);
-        // --- END MODIFICATION ---
     } catch (error) {
         console.error("DEBUG: Failed to load agent status:", error);
         ui.showAgentStatusError(`Lỗi tải trạng thái agent: ${error.message}`);
@@ -275,58 +278,42 @@ function loadAllSettings() {
 
 // --- Event Handlers ---
 
-// --- MODIFIED: handleConfigureAgentClick to accept clickedRow ---
 async function handleConfigureAgentClick(agentId, clusterName, clickedRow) {
     console.log(`Configure button clicked for agent: ${agentId} (Cluster: ${clusterName})`);
     if (!agentConfigSection || !configAgentIdSpan || !clickedRow) return;
-
     currentConfiguringAgentId = agentId;
     ui.showLoading();
     if(saveAgentGeneralConfigStatus) saveAgentGeneralConfigStatus.classList.add('hidden');
     if(saveAgentNsConfigStatus) saveAgentNsConfigStatus.classList.add('hidden');
     resetAgentConfigForms();
-
     ui.setText(configAgentIdSpan, `${agentId} (${clusterName || 'N/A'})`);
-
-    // --- ADDED: Extract cluster info from the table row ---
     let k8sVersion = 'N/A';
     let nodeCount = 'N/A';
     try {
-        // Find the cells containing the K8s version and node count
-        // Assumes specific classes or order. Adjust selector if HTML changes.
-        const versionCell = clickedRow.querySelector('td:nth-child(5)'); // 5th column
-        const countCell = clickedRow.querySelector('td:nth-child(6)'); // 6th column
+        // Use more specific selectors based on added classes
+        const versionCell = clickedRow.querySelector('td.agent-k8s-version-cell');
+        const countCell = clickedRow.querySelector('td.agent-node-count-cell');
         if (versionCell) k8sVersion = versionCell.textContent || 'N/A';
         if (countCell) nodeCount = countCell.textContent || 'N/A';
         console.log(`Extracted from row: K8s=${k8sVersion}, Nodes=${nodeCount}`);
     } catch (e) {
         console.error("Error extracting cluster info from table row:", e);
     }
-    // --- END ADDED ---
-
     try {
         const agentConfig = await api.fetchAgentConfig(agentId);
         console.log("Fetched agent config:", agentConfig);
-
-        // --- MODIFIED: Call ui.populateAgentConfigForm ---
-        // Pass both fetched config and extracted cluster info
         ui.populateAgentConfigForm(agentConfig, { k8sVersion, nodeCount });
-        // --- END MODIFICATION ---
-
         await renderAgentNamespaceList(agentConfig.monitored_namespaces || []);
         agentConfigSection.classList.remove('hidden');
         switchAgentConfigTab('agent-general');
-
     } catch (error) {
         console.error(`Error loading configuration for agent ${agentId}:`, error);
         alert(`Không thể tải cấu hình cho agent ${agentId}: ${error.message}`);
-        // Optionally hide the config section if loading fails completely
         agentConfigSection.classList.add('hidden');
     } finally {
         ui.hideLoading();
     }
 }
-// --- END MODIFICATION ---
 
 
 function resetAgentConfigForms() {
@@ -338,7 +325,6 @@ function resetAgentConfigForms() {
          ui.setText(agentNamespaceLoadingText, 'Chọn agent để tải namespace...');
          agentNamespaceLoadingText.classList.remove('hidden');
      }
-     // Reset the new read-only fields as well
      ui.populateAgentConfigForm({}, { k8sVersion: 'N/A', nodeCount: 'N/A' });
  }
 
@@ -501,15 +487,20 @@ async function handleCreateUserSubmit(event) {
     try {
         const result = await api.createUser(userData);
         ui.showStatusMessage(createUserStatus, result.message || 'Tạo user thành công!', 'success');
-        ui.clearCreateUserForm();
-        await loadUserManagementData();
+        // --- MODIFIED: Close modal on success ---
+        ui.closeCreateUserModal();
+        // --- END MODIFICATION ---
+        await loadUserManagementData(); // Reload user list
     } catch (error) {
         console.error("Error creating user:", error);
         ui.showStatusMessage(createUserStatus, `Lỗi: ${error.message}`, 'error');
     } finally {
         ui.hideLoading();
         createUserButton.disabled = false;
-        ui.hideStatusMessage(createUserStatus);
+        // Hide status unless it's an error
+        if (!createUserStatus.textContent.startsWith('Lỗi')) {
+            ui.hideStatusMessage(createUserStatus);
+        }
     }
 }
 
@@ -554,12 +545,14 @@ function applyRolePermissions() {
     console.log(`Applying permissions for role: ${currentUserRole}, isAdmin: ${isAdmin}`);
     document.querySelector('a[href="#settings"]')?.parentElement?.classList.toggle('hidden', !isAdmin);
     document.querySelector('a[href="#user-management"]')?.parentElement?.classList.toggle('hidden', !isAdmin);
+    // Disable buttons based on role
     if (saveTelegramConfigButton) saveTelegramConfigButton.disabled = !isAdmin;
     if (saveAiConfigButton) saveAiConfigButton.disabled = !isAdmin;
     if (saveAgentGeneralConfigButton) saveAgentGeneralConfigButton.disabled = !isAdmin;
     if (saveAgentNsConfigButton) saveAgentNsConfigButton.disabled = !isAdmin;
-    if (createUserButton) createUserButton.disabled = !isAdmin;
+    if (createUserButton) createUserButton.disabled = !isAdmin; // Disable the submit button inside modal
     if (saveUserChangesButton) saveUserChangesButton.disabled = !isAdmin;
+    if (openCreateUserModalButton) openCreateUserModalButton.disabled = !isAdmin; // Disable the button to open the modal
 }
 
 
@@ -568,6 +561,8 @@ document.addEventListener('DOMContentLoaded', () => {
     currentUserRole = document.body.dataset.userRole || 'user';
     applyRolePermissions();
     ui.setActiveSection('dashboard', loadActiveSectionData);
+
+    // Sidebar navigation
     sidebarItems.forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
@@ -579,6 +574,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if(targetId) ui.setActiveSection(targetId, loadActiveSectionData);
         });
     });
+
+    // Incident filtering and pagination
     if (filterButton) filterButton.addEventListener('click', () => {
         currentPodFilter = podFilterInput?.value || '';
         currentSeverityFilter = severityFilterSelect?.value || '';
@@ -593,6 +590,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (nextPageButton) nextPageButton.addEventListener('click', () => {
         if (currentIncidentPage < totalIncidentPages) { currentIncidentPage++; loadIncidentsData(true); }
     });
+
+    // Dashboard time range selection
     timeRangeButtons.forEach(button => {
         button.addEventListener('click', () => {
             const days = parseInt(button.getAttribute('data-days'));
@@ -610,16 +609,18 @@ document.addEventListener('DOMContentLoaded', () => {
          if (button.getAttribute('data-days') === '1') { button.click(); }
          else { button.disabled = false; }
     });
+
+    // Settings page listeners
     if (saveTelegramConfigButton) saveTelegramConfigButton.addEventListener('click', settings.saveTelegramSettings);
     if (saveAiConfigButton) saveAiConfigButton.addEventListener('click', settings.saveAiSettings);
     if (enableAiToggle) enableAiToggle.addEventListener('change', settings.handleAiToggleChange);
+
+    // Agent configuration listeners
     if (agentConfigTabs) {
         agentConfigTabs.forEach(tab => {
             tab.addEventListener('click', () => {
                 const targetTabId = tab.getAttribute('data-tab');
-                if (targetTabId) {
-                    switchAgentConfigTab(targetTabId);
-                }
+                if (targetTabId) { switchAgentConfigTab(targetTabId); }
             });
         });
     }
@@ -627,8 +628,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (saveAgentNsConfigButton) saveAgentNsConfigButton.addEventListener('click', handleSaveAgentNamespaces);
     if (closeAgentConfigButton) closeAgentConfigButton.addEventListener('click', handleCloseAgentConfig);
     if (refreshAgentStatusButton) refreshAgentStatusButton.addEventListener('click', loadAgentStatus);
+
+    // User management listeners
     if (createUserForm) createUserForm.addEventListener('submit', handleCreateUserSubmit);
     if (editUserForm) editUserForm.addEventListener('submit', handleEditUserSubmit);
+    // --- ADDED: Listener for opening create user modal ---
+    if (openCreateUserModalButton) {
+        openCreateUserModalButton.addEventListener('click', ui.openCreateUserModal);
+    }
+    // --- END ADDED ---
+
+    // Password confirmation validation
     if (confirmPasswordInput) {
         confirmPasswordInput.addEventListener('input', () => {
             if (newPasswordInput?.value !== confirmPasswordInput.value) {
@@ -647,15 +657,31 @@ document.addEventListener('DOMContentLoaded', () => {
              }
          });
      }
-    if (modalCloseButton) modalCloseButton.addEventListener('click', ui.closeModal);
-    if (editUserModalCloseButton) editUserModalCloseButton.addEventListener('click', ui.closeEditUserModal);
-    if (modalOverlay) modalOverlay.addEventListener('click', (event) => { if (event.target === modalOverlay) ui.closeModal(); });
-    if (editUserModal) editUserModal.addEventListener('click', (event) => { if (event.target === editUserModal) ui.closeEditUserModal(); });
+
+    // Modal closing listeners
+    if (modalCloseButton) modalCloseButton.addEventListener('click', ui.closeModal); // Incident modal
+    if (editUserModalCloseButton) editUserModalCloseButton.addEventListener('click', ui.closeEditUserModal); // Edit user modal
+    // --- ADDED: Listener for closing create user modal ---
+    if (createUserModalCloseButton) createUserModalCloseButton.addEventListener('click', ui.closeCreateUserModal);
+    // --- END ADDED ---
+    // Close modals on Escape key press
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
              if (document.getElementById('incident-modal')?.classList.contains('modal-visible')) ui.closeModal();
              if (editUserModal && !editUserModal.classList.contains('hidden')) ui.closeEditUserModal();
+             // --- ADDED: Close create user modal on Escape ---
+             if (createUserModal && !createUserModal.classList.contains('hidden')) ui.closeCreateUserModal();
+             // --- END ADDED ---
         }
     });
+    // Close modal if clicking outside the content area (optional, adjust selectors if needed)
+    // if (modalOverlay) modalOverlay.addEventListener('click', (event) => { if (event.target === modalOverlay) ui.closeModal(); }); // Incident modal overlay
+    // if (editUserModal) editUserModal.addEventListener('click', (event) => { if (event.target === editUserModal) ui.closeEditUserModal(); }); // Edit user modal overlay
+    // --- ADDED: Close create user modal on overlay click ---
+    if (createUserModal) createUserModal.addEventListener('click', (event) => { if (event.target === createUserModal) ui.closeCreateUserModal(); });
+    // --- END ADDED ---
+
+
     console.log("DEBUG: main.js loaded and event listeners attached.");
+
 });
