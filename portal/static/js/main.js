@@ -4,6 +4,7 @@ import * as ui from './ui.js';
 import * as charts from './charts.js';
 import * as settings from './settings.js';
 
+// --- State Variables ---
 let currentIncidentPage = 1;
 let totalIncidentPages = 1;
 let currentPodFilter = '';
@@ -16,6 +17,8 @@ let usersDataCache = {};
 let currentConfiguringAgentId = null;
 let currentUserRole = 'user';
 
+// --- DOM Element References ---
+// Charts
 const lineChartCtx = document.getElementById('statsChart')?.getContext('2d');
 const lineChartErrorElem = document.getElementById('line-chart-error');
 const lineChartNoDataElem = document.getElementById('line-chart-no-data');
@@ -28,6 +31,7 @@ const namespacePieNoDataElem = document.getElementById('namespace-pie-no-data');
 const severityPieCtx = document.getElementById('severityPieChart')?.getContext('2d');
 const severityPieErrorElem = document.getElementById('severity-pie-error');
 const severityPieNoDataElem = document.getElementById('severity-pie-no-data');
+// Incidents
 const incidentsTableBody = document.getElementById('incidents-table-body');
 const podFilterInput = document.getElementById('pod-filter');
 const severityFilterSelect = document.getElementById('severity-filter');
@@ -37,32 +41,42 @@ const paginationControls = document.getElementById('pagination-controls');
 const paginationInfo = document.getElementById('pagination-info');
 const prevPageButton = document.getElementById('prev-page');
 const nextPageButton = document.getElementById('next-page');
+// Dashboard Stats
 const totalIncidentsElem = document.getElementById('total-incidents');
 const totalGeminiCallsElem = document.getElementById('total-gemini-calls');
 const totalTelegramAlertsElem = document.getElementById('total-telegram-alerts');
 const timeRangeButtons = document.querySelectorAll('.time-range-btn');
+// Settings (Global)
 const saveTelegramConfigButton = document.getElementById('save-telegram-config-button');
 const saveAiConfigButton = document.getElementById('save-ai-config-button');
 const enableAiToggle = document.getElementById('enable-ai-toggle');
+// General UI
 const sidebarItems = document.querySelectorAll('.sidebar-item');
 const modalCloseButton = document.getElementById('modal-close-button');
 const modalOverlay = document.querySelector('.modal-overlay');
+// Agent Monitoring
 const agentStatusTableBody = document.getElementById('agent-status-table-body');
 const agentStatusErrorElem = document.getElementById('agent-status-error');
+const refreshAgentStatusButton = document.getElementById('refresh-agent-status-button');
+// Agent Config Section
 const agentConfigSection = document.getElementById('agent-config-section');
 const configAgentIdSpan = document.getElementById('config-agent-id');
 const agentConfigTabs = document.querySelectorAll('.agent-config-tab');
 const agentConfigTabContents = document.querySelectorAll('.agent-config-tab-content');
+// Agent General Config Form
 const agentScanIntervalInput = document.getElementById('agent-scan-interval');
 const agentRestartThresholdInput = document.getElementById('agent-restart-threshold');
 const agentLokiScanLevelSelect = document.getElementById('agent-loki-scan-level');
 const saveAgentGeneralConfigButton = document.getElementById('save-agent-general-config-button');
 const saveAgentGeneralConfigStatus = document.getElementById('save-agent-general-config-status');
+// Agent Namespace Config Form
 const agentNamespaceListDiv = document.getElementById('agent-namespace-list');
 const agentNamespaceLoadingText = document.getElementById('agent-namespace-loading-text');
 const saveAgentNsConfigButton = document.getElementById('save-agent-ns-config-button');
 const saveAgentNsConfigStatus = document.getElementById('save-agent-ns-config-status');
+// Agent Config Close Button
 const closeAgentConfigButton = document.getElementById('close-agent-config-button');
+// User Management
 const createUserForm = document.getElementById('create-user-form');
 const createUserButton = document.getElementById('create-user-button');
 const createUserStatus = document.getElementById('create-user-status');
@@ -77,132 +91,62 @@ const editUserForm = document.getElementById('edit-user-form');
 const editUserStatus = document.getElementById('edit-user-status');
 const saveUserChangesButton = document.getElementById('save-user-changes-button');
 
+// --- Data Loading Functions ---
 
 async function loadAgentStatus() {
-    const agentTableBody = document.getElementById('agent-status-table-body');
-    const agentErrorElem = document.getElementById('agent-status-error');
-
-    if (!agentTableBody || !agentErrorElem) {
+    if (!agentStatusTableBody || !agentStatusErrorElem) {
         console.warn("Agent status table elements not found. Skipping load.");
         return;
     }
-
-    agentTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-500">Đang tải trạng thái agent...</td></tr>`;
-    agentErrorElem.classList.add('hidden');
-
+    ui.showLoading();
+    agentStatusTableBody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-gray-500">Đang tải trạng thái agent...</td></tr>`;
+    agentStatusErrorElem.classList.add('hidden');
     try {
         const data = await api.fetchAgentStatus();
         const agents = data.active_agents || [];
-
-        agentTableBody.innerHTML = '';
-
-        if (agents.length === 0) {
-            agentTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-500">Không có agent nào đang hoạt động.</td></tr>`;
-            return;
-        }
-
-        agents.forEach(agent => {
-            const row = document.createElement('tr');
-            row.setAttribute('data-agent-id', agent.agent_id);
-
-            const createCell = (content, isHtml = false) => {
-                const cell = document.createElement('td');
-                cell.className = 'px-4 py-3 text-sm text-gray-700 align-middle';
-                ui.setText(cell, content, isHtml);
-                return cell;
-            };
-
-            const actionCell = document.createElement('td');
-            actionCell.className = 'px-4 py-3 text-sm text-gray-700 align-middle';
-            const actionContainer = document.createElement('div');
-            actionContainer.className = 'flex items-center space-x-2';
-
-            if (currentUserRole === 'admin') {
-                const configButton = document.createElement('button');
-                configButton.textContent = 'Cấu hình';
-                configButton.className = 'text-indigo-600 hover:text-indigo-900 hover:underline text-xs font-medium whitespace-nowrap configure-agent-btn';
-                configButton.onclick = () => handleConfigureAgentClick(agent.agent_id, agent.cluster_name);
-                actionContainer.appendChild(configButton);
-            }
-
-            actionCell.appendChild(actionContainer);
-
-            row.appendChild(createCell(`${agent.agent_id || 'N/A'} / ${agent.cluster_name || 'N/A'}`));
-            row.appendChild(createCell(`<span class="severity-badge severity-info">Active</span>`, true));
-            row.appendChild(createCell(ui.formatVietnameseDateTime(agent.last_seen_timestamp)));
-            row.appendChild(createCell(agent.agent_version || 'N/A'));
-            row.appendChild(actionCell);
-
-            agentTableBody.appendChild(row);
-        });
-
+        // --- MODIFIED: Pass the clicked row element to the configure callback ---
+        ui.renderAgentStatusTable(agents, (agentId, clusterName, clickedRow) => {
+            handleConfigureAgentClick(agentId, clusterName, clickedRow);
+        }, currentUserRole);
+        // --- END MODIFICATION ---
     } catch (error) {
         console.error("DEBUG: Failed to load agent status:", error);
-        agentTableBody.innerHTML = '';
-        agentErrorElem.classList.remove('hidden');
-        ui.setText(agentErrorElem, `Lỗi tải trạng thái agent: ${error.message}`);
+        ui.showAgentStatusError(`Lỗi tải trạng thái agent: ${error.message}`);
+    } finally {
+        ui.hideLoading();
     }
 }
 
 async function loadUserManagementData() {
     console.log("Loading user management data...");
     if (!usersTableBody) return;
-
+    ui.showLoading();
     usersTableBody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-gray-500">Đang tải danh sách user...</td></tr>`;
     if (usersListErrorElem) usersListErrorElem.classList.add('hidden');
     usersDataCache = {};
-
     try {
         const users = await api.fetchUsers();
-        users.forEach(user => {
-            usersDataCache[user.id] = user;
-        });
+        users.forEach(user => { usersDataCache[user.id] = user; });
         ui.renderUserTable(users, handleEditUserClick);
     } catch (error) {
         console.error("Failed to load users:", error);
         ui.showUserListError(`Lỗi tải danh sách user: ${error.message}`);
+    } finally {
+        ui.hideLoading();
     }
 }
-
-
-async function loadClusterInformation() {
-    ui.showClusterInfoLoading();
-    try {
-        const clusterData = await api.fetchClusterInfo();
-        ui.renderClusterInfo(clusterData);
-    } catch (error) {
-        console.error("Failed to load cluster information:", error);
-        ui.showClusterInfoError(error.message);
-    }
-}
-
 
 function loadActiveSectionData(activeSectionId) {
     console.log(`DEBUG: Loading data for section: ${activeSectionId}`);
     if (agentConfigSection) agentConfigSection.classList.add('hidden');
     currentConfiguringAgentId = null;
-
     switch (activeSectionId) {
-        case 'dashboard':
-            loadDashboardData();
-            break;
-        case 'incidents':
-            loadIncidentsData(true);
-            break;
-        case 'kubernetes-monitoring':
-            loadClusterInformation();
-            loadAgentStatus();
-            break;
-        case 'settings':
-            settings.loadTelegramSettings();
-            settings.loadAiSettings();
-            break;
-        case 'user-management':
-             loadUserManagementData();
-             break;
-        default:
-            console.warn(`Unhandled section ID: ${activeSectionId}`);
-            loadDashboardData();
+        case 'dashboard': loadDashboardData(); break;
+        case 'incidents': loadIncidentsData(true); break;
+        case 'kubernetes-monitoring': loadAgentStatus(); break;
+        case 'settings': settings.loadTelegramSettings(); settings.loadAiSettings(); break;
+        case 'user-management': loadUserManagementData(); break;
+        default: console.warn(`Unhandled section ID: ${activeSectionId}`); loadDashboardData();
     }
 }
 
@@ -212,13 +156,15 @@ async function loadDashboardData() {
     if(topPodsErrorElem) topPodsErrorElem.classList.add('hidden');
     if(namespacePieErrorElem) namespacePieErrorElem.classList.add('hidden');
     if(severityPieErrorElem) severityPieErrorElem.classList.add('hidden');
-
+    if(lineChartNoDataElem) lineChartNoDataElem.classList.add('hidden');
+    if(topPodsNoDataElem) topPodsNoDataElem.classList.add('hidden');
+    if(namespacePieNoDataElem) namespacePieNoDataElem.classList.add('hidden');
+    if(severityPieNoDataElem) severityPieNoDataElem.classList.add('hidden');
     try {
         const statsData = await api.fetchStats(currentStatsDays);
         ui.setText(totalIncidentsElem, statsData.totals?.incidents ?? '0');
         ui.setText(totalGeminiCallsElem, statsData.totals?.model_calls ?? '0');
         ui.setText(totalTelegramAlertsElem, statsData.totals?.telegram_alerts ?? '0');
-
         const chartDays = Math.max(currentStatsDays, 7);
         let statsForLineChart = statsData;
         if (chartDays !== currentStatsDays) {
@@ -228,7 +174,6 @@ async function loadDashboardData() {
         charts.renderLineChart(lineChartCtx, lineChartErrorElem, lineChartNoDataElem, statsForLineChart.daily_stats_for_chart);
         charts.renderTopPodsBarChart(topPodsCtx, topPodsErrorElem, topPodsNoDataElem, statsData.top_problematic_pods || {});
         charts.renderNamespacePieChart(namespacePieCtx, namespacePieErrorElem, namespacePieNoDataElem, statsData.namespace_distribution || {});
-
         if (currentStatsDays === 1) {
             charts.renderSeverityPieChart(severityPieCtx, severityPieErrorElem, severityPieNoDataElem, statsData.severity_distribution_today || {});
             if (severityPieNoDataElem) ui.setText(severityPieNoDataElem, `Không có sự cố hôm nay.`);
@@ -253,19 +198,13 @@ async function loadDashboardData() {
 
 async function loadIncidentsData(forceReload = false) {
     const tableBody = document.getElementById('incidents-table-body');
-    if (!tableBody) {
-        console.error("Incidents table body not found!");
-        return;
-    }
+    if (!tableBody) { console.error("Incidents table body not found!"); return; }
     const tableBodyContent = tableBody.innerHTML.trim() || '';
-    if (!forceReload && tableBodyContent && !tableBodyContent.includes('Đang tải dữ liệu') && !tableBodyContent.includes('Không tìm thấy')) {
-        return;
-    }
+    if (!forceReload && tableBodyContent && !tableBodyContent.includes('Đang tải dữ liệu') && !tableBodyContent.includes('Không tìm thấy')) { return; }
     ui.showLoading();
     tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-500">Đang tải dữ liệu...</td></tr>`;
     if (paginationControls) paginationControls.classList.add('hidden');
     incidentsDataCache = {};
-
     try {
         const data = await api.fetchIncidents(currentIncidentPage, currentPodFilter, currentSeverityFilter, currentIncidentStartDate, currentIncidentEndDate);
         const incidents = data.incidents;
@@ -295,9 +234,7 @@ async function loadIncidentsData(forceReload = false) {
                     const cell = document.createElement('td');
                     cell.className = 'px-4 py-3 text-sm text-gray-700 align-top';
                     ui.setText(cell, content, isHtml);
-                    if (!isHtml) {
-                        cell.title = cell.textContent || '';
-                    }
+                    if (!isHtml) { cell.title = cell.textContent || ''; }
                     cell.classList.toggle('whitespace-normal', allowWrap);
                     cell.classList.toggle('whitespace-nowrap', !allowWrap);
                     cell.classList.toggle('overflow-hidden', !allowWrap);
@@ -336,10 +273,12 @@ function loadAllSettings() {
     settings.loadAiSettings();
 }
 
+// --- Event Handlers ---
 
-async function handleConfigureAgentClick(agentId, clusterName) {
+// --- MODIFIED: handleConfigureAgentClick to accept clickedRow ---
+async function handleConfigureAgentClick(agentId, clusterName, clickedRow) {
     console.log(`Configure button clicked for agent: ${agentId} (Cluster: ${clusterName})`);
-    if (!agentConfigSection || !configAgentIdSpan) return;
+    if (!agentConfigSection || !configAgentIdSpan || !clickedRow) return;
 
     currentConfiguringAgentId = agentId;
     ui.showLoading();
@@ -349,26 +288,46 @@ async function handleConfigureAgentClick(agentId, clusterName) {
 
     ui.setText(configAgentIdSpan, `${agentId} (${clusterName || 'N/A'})`);
 
+    // --- ADDED: Extract cluster info from the table row ---
+    let k8sVersion = 'N/A';
+    let nodeCount = 'N/A';
+    try {
+        // Find the cells containing the K8s version and node count
+        // Assumes specific classes or order. Adjust selector if HTML changes.
+        const versionCell = clickedRow.querySelector('td:nth-child(5)'); // 5th column
+        const countCell = clickedRow.querySelector('td:nth-child(6)'); // 6th column
+        if (versionCell) k8sVersion = versionCell.textContent || 'N/A';
+        if (countCell) nodeCount = countCell.textContent || 'N/A';
+        console.log(`Extracted from row: K8s=${k8sVersion}, Nodes=${nodeCount}`);
+    } catch (e) {
+        console.error("Error extracting cluster info from table row:", e);
+    }
+    // --- END ADDED ---
+
     try {
         const agentConfig = await api.fetchAgentConfig(agentId);
         console.log("Fetched agent config:", agentConfig);
 
-        if (agentScanIntervalInput) agentScanIntervalInput.value = agentConfig.scan_interval_seconds ?? 30;
-        if (agentRestartThresholdInput) agentRestartThresholdInput.value = agentConfig.restart_count_threshold ?? 5;
-        if (agentLokiScanLevelSelect) agentLokiScanLevelSelect.value = agentConfig.loki_scan_min_level ?? 'INFO';
+        // --- MODIFIED: Call ui.populateAgentConfigForm ---
+        // Pass both fetched config and extracted cluster info
+        ui.populateAgentConfigForm(agentConfig, { k8sVersion, nodeCount });
+        // --- END MODIFICATION ---
 
         await renderAgentNamespaceList(agentConfig.monitored_namespaces || []);
-
         agentConfigSection.classList.remove('hidden');
         switchAgentConfigTab('agent-general');
 
     } catch (error) {
         console.error(`Error loading configuration for agent ${agentId}:`, error);
         alert(`Không thể tải cấu hình cho agent ${agentId}: ${error.message}`);
+        // Optionally hide the config section if loading fails completely
+        agentConfigSection.classList.add('hidden');
     } finally {
         ui.hideLoading();
     }
 }
+// --- END MODIFICATION ---
+
 
 function resetAgentConfigForms() {
      if (agentScanIntervalInput) agentScanIntervalInput.value = '30';
@@ -379,22 +338,21 @@ function resetAgentConfigForms() {
          ui.setText(agentNamespaceLoadingText, 'Chọn agent để tải namespace...');
          agentNamespaceLoadingText.classList.remove('hidden');
      }
+     // Reset the new read-only fields as well
+     ui.populateAgentConfigForm({}, { k8sVersion: 'N/A', nodeCount: 'N/A' });
  }
 
 
 async function renderAgentNamespaceList(monitoredNamespaces = []) {
     if (!agentNamespaceListDiv || !agentNamespaceLoadingText) return;
-
     agentNamespaceListDiv.innerHTML = '';
     agentNamespaceLoadingText.classList.remove('hidden');
     ui.setText(agentNamespaceLoadingText, 'Đang tải danh sách namespace khả dụng...');
-
     try {
         const availableNamespaces = await api.fetchAvailableNamespaces();
         agentNamespaceLoadingText.classList.add('hidden');
-
         if (availableNamespaces.length === 0) {
-            agentNamespaceListDiv.innerHTML = `<p class="text-gray-500 col-span-full text-center py-4">Không tìm thấy namespace nào trong cluster.</p>`;
+            agentNamespaceListDiv.innerHTML = `<p class="text-gray-500 col-span-full text-center py-4">Không tìm thấy namespace nào.</p>`;
         } else {
             availableNamespaces.forEach(ns => {
                 const isChecked = monitoredNamespaces.includes(ns);
@@ -432,7 +390,6 @@ function switchAgentConfigTab(targetTabId) {
         tab.classList.toggle('hover:text-gray-700', !isTarget);
         tab.classList.toggle('hover:border-gray-300', !isTarget);
     });
-
     agentConfigTabContents.forEach(content => {
         content.classList.toggle('hidden', content.id !== `${targetTabId}-tab`);
     });
@@ -440,29 +397,23 @@ function switchAgentConfigTab(targetTabId) {
 
 async function handleSaveAgentGeneralConfig() {
     if (!currentConfiguringAgentId || !saveAgentGeneralConfigButton || !saveAgentGeneralConfigStatus) return;
-
     ui.showLoading();
     saveAgentGeneralConfigButton.disabled = true;
     ui.showStatusMessage(saveAgentGeneralConfigStatus, 'Đang lưu...', 'info');
-
     let configData;
     try {
         const scanInterval = parseInt(agentScanIntervalInput?.value ?? '0');
         const restartThreshold = parseInt(agentRestartThresholdInput?.value ?? '0');
         const scanLevel = agentLokiScanLevelSelect?.value ?? 'INFO';
-
         if (isNaN(scanInterval) || scanInterval < 10) throw new Error("Tần suất quét phải là số >= 10.");
         if (isNaN(restartThreshold) || restartThreshold < 1) throw new Error("Ngưỡng khởi động lại phải là số >= 1.");
-
         configData = {
             scan_interval_seconds: scanInterval,
             restart_count_threshold: restartThreshold,
             loki_scan_min_level: scanLevel,
         };
-
         await api.saveAgentGeneralConfig(currentConfiguringAgentId, configData);
         ui.showStatusMessage(saveAgentGeneralConfigStatus, 'Đã lưu thành công!', 'success');
-
     } catch (error) {
         console.error(`Error saving general config for agent ${currentConfiguringAgentId}:`, error);
         if (error.message.includes("phải là số")) {
@@ -475,7 +426,7 @@ async function handleSaveAgentGeneralConfig() {
     } finally {
         ui.hideLoading();
         saveAgentGeneralConfigButton.disabled = false;
-        if (saveAgentGeneralConfigStatus && !saveAgentGeneralConfigStatus.classList.contains('hidden') && !alert.caller) {
+        if (saveAgentGeneralConfigStatus && !saveAgentGeneralConfigStatus.classList.contains('hidden') && !saveAgentGeneralConfigStatus.textContent.startsWith('Lỗi')) {
             ui.hideStatusMessage(saveAgentGeneralConfigStatus);
         }
     }
@@ -483,16 +434,13 @@ async function handleSaveAgentGeneralConfig() {
 
 async function handleSaveAgentNamespaces() {
     if (!currentConfiguringAgentId || !saveAgentNsConfigButton || !saveAgentNsConfigStatus || !agentNamespaceListDiv) return;
-
     ui.showLoading();
     saveAgentNsConfigButton.disabled = true;
     ui.showStatusMessage(saveAgentNsConfigStatus, 'Đang lưu...', 'info');
-
     const selectedNamespaces = [];
     agentNamespaceListDiv.querySelectorAll('input[type="checkbox"]:checked').forEach(checkbox => {
         selectedNamespaces.push(checkbox.value);
     });
-
     try {
         await api.saveAgentMonitoredNamespaces(currentConfiguringAgentId, selectedNamespaces);
         ui.showStatusMessage(saveAgentNsConfigStatus, 'Đã lưu thành công!', 'success');
@@ -527,10 +475,8 @@ function handleEditUserClick(user) {
 async function handleCreateUserSubmit(event) {
     event.preventDefault();
     if (!createUserForm || !createUserButton || !createUserStatus) return;
-
     const password = newPasswordInput?.value;
     const confirmPassword = confirmPasswordInput?.value;
-
     if (password !== confirmPassword) {
         if (passwordMatchError) passwordMatchError.classList.remove('hidden');
         if (confirmPasswordInput) confirmPasswordInput.focus();
@@ -543,18 +489,15 @@ async function handleCreateUserSubmit(event) {
          if (newPasswordInput) newPasswordInput.focus();
          return;
      }
-
     ui.showLoading();
     createUserButton.disabled = true;
     ui.showStatusMessage(createUserStatus, 'Đang tạo user...', 'info');
-
     const userData = {
         username: createUserForm.elements['username'].value,
         password: password,
         fullname: createUserForm.elements['fullname'].value,
         role: createUserForm.elements['role'].value
     };
-
     try {
         const result = await api.createUser(userData);
         ui.showStatusMessage(createUserStatus, result.message || 'Tạo user thành công!', 'success');
@@ -574,7 +517,6 @@ async function handleCreateUserSubmit(event) {
 async function handleEditUserSubmit(event) {
     event.preventDefault();
     if (!editUserForm || !saveUserChangesButton || !editUserStatus) return;
-
     const userId = document.getElementById('edit-user-id')?.value;
     if (!userId) {
         console.error("User ID not found in edit form.");
@@ -582,16 +524,13 @@ async function handleEditUserSubmit(event) {
         ui.hideStatusMessage(editUserStatus);
         return;
     }
-
     ui.showLoading();
     saveUserChangesButton.disabled = true;
     ui.showStatusMessage(editUserStatus, 'Đang lưu thay đổi...', 'info');
-
     const userDataToUpdate = {
         fullname: document.getElementById('edit-fullname')?.value,
         role: document.getElementById('edit-role')?.value
     };
-
     try {
         const result = await api.updateUser(userId, userDataToUpdate);
         ui.showStatusMessage(editUserStatus, result.message || 'Cập nhật thành công!', 'success');
@@ -613,26 +552,22 @@ async function handleEditUserSubmit(event) {
 function applyRolePermissions() {
     const isAdmin = (currentUserRole === 'admin');
     console.log(`Applying permissions for role: ${currentUserRole}, isAdmin: ${isAdmin}`);
-
     document.querySelector('a[href="#settings"]')?.parentElement?.classList.toggle('hidden', !isAdmin);
     document.querySelector('a[href="#user-management"]')?.parentElement?.classList.toggle('hidden', !isAdmin);
-
     if (saveTelegramConfigButton) saveTelegramConfigButton.disabled = !isAdmin;
     if (saveAiConfigButton) saveAiConfigButton.disabled = !isAdmin;
     if (saveAgentGeneralConfigButton) saveAgentGeneralConfigButton.disabled = !isAdmin;
     if (saveAgentNsConfigButton) saveAgentNsConfigButton.disabled = !isAdmin;
     if (createUserButton) createUserButton.disabled = !isAdmin;
     if (saveUserChangesButton) saveUserChangesButton.disabled = !isAdmin;
-
 }
 
 
+// --- Initialization and Event Listeners ---
 document.addEventListener('DOMContentLoaded', () => {
     currentUserRole = document.body.dataset.userRole || 'user';
     applyRolePermissions();
-
     ui.setActiveSection('dashboard', loadActiveSectionData);
-
     sidebarItems.forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
@@ -644,7 +579,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if(targetId) ui.setActiveSection(targetId, loadActiveSectionData);
         });
     });
-
     if (filterButton) filterButton.addEventListener('click', () => {
         currentPodFilter = podFilterInput?.value || '';
         currentSeverityFilter = severityFilterSelect?.value || '';
@@ -659,7 +593,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (nextPageButton) nextPageButton.addEventListener('click', () => {
         if (currentIncidentPage < totalIncidentPages) { currentIncidentPage++; loadIncidentsData(true); }
     });
-
     timeRangeButtons.forEach(button => {
         button.addEventListener('click', () => {
             const days = parseInt(button.getAttribute('data-days'));
@@ -677,11 +610,9 @@ document.addEventListener('DOMContentLoaded', () => {
          if (button.getAttribute('data-days') === '1') { button.click(); }
          else { button.disabled = false; }
     });
-
     if (saveTelegramConfigButton) saveTelegramConfigButton.addEventListener('click', settings.saveTelegramSettings);
     if (saveAiConfigButton) saveAiConfigButton.addEventListener('click', settings.saveAiSettings);
     if (enableAiToggle) enableAiToggle.addEventListener('change', settings.handleAiToggleChange);
-
     if (agentConfigTabs) {
         agentConfigTabs.forEach(tab => {
             tab.addEventListener('click', () => {
@@ -695,10 +626,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (saveAgentGeneralConfigButton) saveAgentGeneralConfigButton.addEventListener('click', handleSaveAgentGeneralConfig);
     if (saveAgentNsConfigButton) saveAgentNsConfigButton.addEventListener('click', handleSaveAgentNamespaces);
     if (closeAgentConfigButton) closeAgentConfigButton.addEventListener('click', handleCloseAgentConfig);
-
+    if (refreshAgentStatusButton) refreshAgentStatusButton.addEventListener('click', loadAgentStatus);
     if (createUserForm) createUserForm.addEventListener('submit', handleCreateUserSubmit);
     if (editUserForm) editUserForm.addEventListener('submit', handleEditUserSubmit);
-
     if (confirmPasswordInput) {
         confirmPasswordInput.addEventListener('input', () => {
             if (newPasswordInput?.value !== confirmPasswordInput.value) {
@@ -717,7 +647,6 @@ document.addEventListener('DOMContentLoaded', () => {
              }
          });
      }
-
     if (modalCloseButton) modalCloseButton.addEventListener('click', ui.closeModal);
     if (editUserModalCloseButton) editUserModalCloseButton.addEventListener('click', ui.closeEditUserModal);
     if (modalOverlay) modalOverlay.addEventListener('click', (event) => { if (event.target === modalOverlay) ui.closeModal(); });
@@ -728,7 +657,5 @@ document.addEventListener('DOMContentLoaded', () => {
              if (editUserModal && !editUserModal.classList.contains('hidden')) ui.closeEditUserModal();
         }
     });
-
     console.log("DEBUG: main.js loaded and event listeners attached.");
-
 });

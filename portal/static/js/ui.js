@@ -8,7 +8,7 @@ const incidentModal = document.getElementById('incident-modal');
 const modalOverlay = document.querySelector('.modal-overlay');
 const modalTimestamp = document.getElementById('modal-timestamp');
 const modalPodKey = document.getElementById('modal-pod-key');
-const modalSeverity = document.getElementById('modal-severity');
+const modalSeverity = document.getElementById('modal-severity'); // Corrected variable name
 const modalInitialReasons = document.getElementById('modal-initial-reasons');
 const modalSummary = document.getElementById('modal-summary');
 const modalRootCause = document.getElementById('modal-root-cause');
@@ -28,17 +28,16 @@ const editFullnameInput = document.getElementById('edit-fullname');
 const editRoleSelect = document.getElementById('edit-role');
 const editUserStatus = document.getElementById('edit-user-status');
 const saveUserChangesButton = document.getElementById('save-user-changes-button');
-const clusterInfoLoading = document.getElementById('cluster-info-loading');
-const clusterInfoError = document.getElementById('cluster-info-error');
-const clusterInfoContent = document.getElementById('cluster-info-content');
-const clusterK8sVersion = document.getElementById('cluster-k8s-version');
-const clusterPlatform = document.getElementById('cluster-platform');
-const clusterTotalNodes = document.getElementById('cluster-total-nodes');
-const clusterCpuCapacity = document.getElementById('cluster-cpu-capacity');
-const clusterMemoryCapacity = document.getElementById('cluster-memory-capacity');
-const clusterOsImage = document.getElementById('cluster-os-image');
-const clusterKernelVersion = document.getElementById('cluster-kernel-version');
-const clusterKubeletVersion = document.getElementById('cluster-kubelet-version');
+const agentStatusTableBody = document.getElementById('agent-status-table-body');
+const agentStatusErrorElem = document.getElementById('agent-status-error');
+// --- ADDED: Elements for cluster info in agent config section ---
+const configAgentK8sVersionSpan = document.getElementById('config-agent-k8s-version');
+const configAgentNodeCountSpan = document.getElementById('config-agent-node-count');
+// --- END ADDED ---
+// Agent General Config Form Elements (already defined in main.js, but good to have refs here too if needed)
+const agentScanIntervalInput = document.getElementById('agent-scan-interval');
+const agentRestartThresholdInput = document.getElementById('agent-restart-threshold');
+const agentLokiScanLevelSelect = document.getElementById('agent-loki-scan-level');
 
 
 export function showLoading() {
@@ -126,7 +125,6 @@ export function openModal(incidentData) {
         console.error(`DEBUG: Incident data not provided or modal element missing.`);
         return;
     }
-
     try {
         setText(modalTimestamp, formatVietnameseDateTime(incidentData.timestamp));
         setText(modalPodKey, incidentData.pod_key);
@@ -137,24 +135,19 @@ export function openModal(incidentData) {
         setText(modalTroubleshootingSteps, incidentData.troubleshooting_steps);
         setText(modalSampleLogs, incidentData.sample_logs);
         setText(modalK8sContext, incidentData.k8s_context);
-
         const aiEnabledForIncident = !!incidentData.input_prompt || !!incidentData.raw_ai_response;
         const rootCauseSection = modalRootCause?.closest('.modal-section');
         const stepsSection = modalTroubleshootingSteps?.closest('.modal-section');
         const promptSection = modalInputPrompt?.closest('.modal-section');
         const responseSection = modalRawAiResponse?.closest('.modal-section');
-
         if (rootCauseSection) rootCauseSection.style.display = aiEnabledForIncident ? 'block' : 'none';
         if (stepsSection) stepsSection.style.display = aiEnabledForIncident ? 'block' : 'none';
         if (promptSection) promptSection.style.display = aiEnabledForIncident ? 'block' : 'none';
         if (responseSection) responseSection.style.display = aiEnabledForIncident ? 'block' : 'none';
-
         setText(modalInputPrompt, incidentData.input_prompt);
         setText(modalRawAiResponse, incidentData.raw_ai_response);
-
         incidentModal.classList.add('modal-visible');
         document.body.style.overflow = 'hidden';
-
     } catch (error) {
         console.error("DEBUG: Error occurred inside openModal:", error);
     }
@@ -172,7 +165,6 @@ export function setActiveSection(targetId, loadSectionDataCallback) {
     contentSections.forEach(section => {
         section.classList.add('hidden');
     });
-
     const targetSection = document.getElementById(targetId + '-content');
     if (targetSection) {
         targetSection.classList.remove('hidden');
@@ -181,7 +173,6 @@ export function setActiveSection(targetId, loadSectionDataCallback) {
         document.getElementById('dashboard-content')?.classList.remove('hidden');
         targetId = 'dashboard';
     }
-
     sidebarItems.forEach(item => {
         const href = item.getAttribute('href');
         const isActive = href === '#' + targetId;
@@ -191,46 +182,97 @@ export function setActiveSection(targetId, loadSectionDataCallback) {
         item.classList.toggle('text-gray-700', !isActive);
         item.classList.toggle('hover:bg-gray-100', !isActive);
     });
-
-
     if (typeof loadSectionDataCallback === 'function') {
         loadSectionDataCallback(targetId);
     }
 }
 
-export function renderUserTable(users, editUserCallback) {
-    if (!usersTableBody) {
-        console.error("User table body element not found.");
+// --- MODIFIED: renderAgentStatusTable passes clicked row to callback ---
+export function renderAgentStatusTable(agents, configureCallback, currentUserRole) {
+    if (!agentStatusTableBody || !agentStatusErrorElem) {
+        console.warn("Agent status table elements not found.");
         return;
     }
+    agentStatusTableBody.innerHTML = '';
+    agentStatusErrorElem.classList.add('hidden');
+    if (!agents || agents.length === 0) {
+        agentStatusTableBody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-gray-500">Không có agent nào đang hoạt động.</td></tr>`;
+        return;
+    }
+    agents.forEach(agent => {
+        const row = document.createElement('tr'); // Keep reference to the row
+        row.setAttribute('data-agent-id', agent.agent_id);
+        const createCell = (content, isHtml = false, cssClass = null) => {
+            const cell = document.createElement('td');
+            cell.className = 'px-4 py-3 text-sm text-gray-700 align-middle whitespace-nowrap';
+            if(cssClass) cell.classList.add(cssClass); // Add specific class if needed
+            setText(cell, content, isHtml);
+            return cell;
+        };
+        row.appendChild(createCell(`${agent.agent_id || 'N/A'} / ${agent.cluster_name || 'N/A'}`));
+        row.appendChild(createCell(`<span class="severity-badge severity-info">Active</span>`, true));
+        row.appendChild(createCell(formatVietnameseDateTime(agent.last_seen_timestamp)));
+        row.appendChild(createCell(agent.agent_version || 'N/A'));
+        // Add specific classes to these cells for easier selection later
+        row.appendChild(createCell(agent.k8s_version || 'N/A', false, 'agent-k8s-version-cell'));
+        row.appendChild(createCell(agent.node_count !== null ? agent.node_count : 'N/A', false, 'agent-node-count-cell'));
+        const actionCell = document.createElement('td');
+        actionCell.className = 'px-4 py-3 text-sm text-gray-700 align-middle';
+        const actionContainer = document.createElement('div');
+        actionContainer.className = 'flex items-center space-x-2';
+        if (currentUserRole === 'admin') {
+            const configButton = document.createElement('button');
+            configButton.textContent = 'Cấu hình';
+            configButton.className = 'text-indigo-600 hover:text-indigo-900 hover:underline text-xs font-medium whitespace-nowrap configure-agent-btn';
+            configButton.onclick = () => {
+                if (typeof configureCallback === 'function') {
+                    // Pass the agent details AND the row element itself
+                    configureCallback(agent.agent_id, agent.cluster_name, row);
+                }
+            };
+            actionContainer.appendChild(configButton);
+        } else {
+             setText(actionContainer, '<i class="text-gray-400">N/A</i>', true);
+        }
+        actionCell.appendChild(actionContainer);
+        row.appendChild(actionCell);
+        agentStatusTableBody.appendChild(row);
+    });
+}
+// --- END MODIFICATION ---
+
+export function showAgentStatusError(message) {
+    if (agentStatusTableBody) agentStatusTableBody.innerHTML = '';
+    if (agentStatusErrorElem) {
+        setText(agentStatusErrorElem, message || 'Lỗi tải trạng thái agent.');
+        agentStatusErrorElem.classList.remove('hidden');
+    }
+}
+
+
+export function renderUserTable(users, editUserCallback) {
+    if (!usersTableBody) { console.error("User table body element not found."); return; }
     if (usersListErrorElem) usersListErrorElem.classList.add('hidden');
-
     usersTableBody.innerHTML = '';
-
     if (!users || users.length === 0) {
         usersTableBody.innerHTML = `<tr><td colspan="4" class="text-center py-6 text-gray-500">Không có người dùng nào.</td></tr>`;
         return;
     }
-
     users.forEach(user => {
         const row = document.createElement('tr');
         row.setAttribute('data-user-id', user.id);
-
         const userCell = document.createElement('td');
         userCell.className = 'px-4 py-2 text-sm text-gray-900 font-medium';
         setText(userCell, user.username);
         row.appendChild(userCell);
-
         const nameCell = document.createElement('td');
         nameCell.className = 'px-4 py-2 text-sm text-gray-600';
         setText(nameCell, user.fullname);
         row.appendChild(nameCell);
-
         const roleCell = document.createElement('td');
         roleCell.className = 'px-4 py-2 text-sm text-gray-600';
         setText(roleCell, user.role);
         row.appendChild(roleCell);
-
         const actionCell = document.createElement('td');
         actionCell.className = 'px-4 py-2 text-sm text-gray-600';
         const editButton = document.createElement('button');
@@ -244,7 +286,6 @@ export function renderUserTable(users, editUserCallback) {
         };
         actionCell.appendChild(editButton);
         row.appendChild(actionCell);
-
         usersTableBody.appendChild(row);
     });
 }
@@ -259,9 +300,7 @@ export function showUserListError(message) {
 
 export function clearCreateUserForm() {
     const form = document.getElementById('create-user-form');
-    if (form) {
-        form.reset();
-    }
+    if (form) { form.reset(); }
     const passwordError = document.getElementById('password-match-error');
     if (passwordError) passwordError.classList.add('hidden');
 }
@@ -293,35 +332,15 @@ export function populateEditUserModal(userData) {
     editRoleSelect.value = userData.role || 'user';
 }
 
-// --- NEW: Render Cluster Info ---
-export function renderClusterInfo(data) {
-    if (!clusterInfoLoading || !clusterInfoError || !clusterInfoContent) return;
+// --- NEW: Function to populate agent config form including read-only cluster info ---
+export function populateAgentConfigForm(agentConfig, clusterInfo) {
+    // Populate editable fields
+    if (agentScanIntervalInput) agentScanIntervalInput.value = agentConfig.scan_interval_seconds ?? 30;
+    if (agentRestartThresholdInput) agentRestartThresholdInput.value = agentConfig.restart_count_threshold ?? 5;
+    if (agentLokiScanLevelSelect) agentLokiScanLevelSelect.value = agentConfig.loki_scan_min_level ?? 'INFO';
 
-    clusterInfoLoading.classList.add('hidden');
-    clusterInfoError.classList.add('hidden');
-    clusterInfoContent.classList.remove('hidden');
-
-    setText(clusterK8sVersion, data.kubernetes_version);
-    setText(clusterPlatform, data.platform);
-    setText(clusterTotalNodes, data.total_nodes);
-    setText(clusterCpuCapacity, data.total_cpu_capacity);
-    setText(clusterMemoryCapacity, data.total_memory_capacity);
-    setText(clusterOsImage, data.os_image_sample);
-    setText(clusterKernelVersion, data.kernel_version_sample);
-    setText(clusterKubeletVersion, data.kubelet_version_sample);
+    // Populate read-only cluster info fields
+    if (configAgentK8sVersionSpan) setText(configAgentK8sVersionSpan, clusterInfo.k8sVersion || 'N/A');
+    if (configAgentNodeCountSpan) setText(configAgentNodeCountSpan, clusterInfo.nodeCount !== null ? clusterInfo.nodeCount : 'N/A');
 }
-
-export function showClusterInfoLoading() {
-    if (!clusterInfoLoading || !clusterInfoError || !clusterInfoContent) return;
-    clusterInfoLoading.classList.remove('hidden');
-    clusterInfoError.classList.add('hidden');
-    clusterInfoContent.classList.add('hidden');
-}
-
-export function showClusterInfoError(message) {
-    if (!clusterInfoLoading || !clusterInfoError || !clusterInfoContent) return;
-    clusterInfoLoading.classList.add('hidden');
-    clusterInfoError.classList.remove('hidden');
-    clusterInfoContent.classList.add('hidden');
-    setText(clusterInfoError, message || 'Lỗi tải thông tin cluster.');
-}
+// --- END NEW ---

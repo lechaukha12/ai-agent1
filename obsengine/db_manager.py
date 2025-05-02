@@ -30,8 +30,8 @@ def _get_db_connection(db_path):
     try:
         conn = sqlite3.connect(db_path, timeout=10)
         conn.row_factory = sqlite3.Row # Return rows as dict-like objects
-        # Enable foreign keys if needed in the future
-        # conn.execute("PRAGMA foreign_keys = ON")
+        # Enable Write-Ahead Logging for better concurrency
+        conn.execute("PRAGMA journal_mode=WAL")
         return conn
     except sqlite3.Error as e:
         logging.error(f"[DB Manager] Database connection error to {db_path}: {e}")
@@ -94,9 +94,7 @@ def init_db(db_path, default_configs={}):
                 )""")
             logging.debug("[DB Manager] Table 'available_namespaces' ensured.")
 
-            # --- MODIFIED: Configuration Table ---
-            # Stores both global and agent-specific settings.
-            # agent_id is NULL for global settings.
+            # Configuration Table (Global and Agent-Specific)
             logging.debug("[DB Manager] Creating table 'agent_config' if not exists...")
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS agent_config (
@@ -106,18 +104,12 @@ def init_db(db_path, default_configs={}):
                     PRIMARY KEY (agent_id, key) -- Composite primary key
                 )""")
             logging.debug("[DB Manager] Table 'agent_config' ensured.")
-
-            # Add index for faster lookup of global settings
-            # This might fail if the table exists but the column doesn't (old schema)
             logging.debug("[DB Manager] Creating index 'idx_global_config' on agent_config(agent_id) if not exists...")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_global_config ON agent_config (agent_id) WHERE agent_id IS NULL")
             logging.debug("[DB Manager] Index 'idx_global_config' ensured.")
-
-            # Add index for faster lookup of agent-specific settings
             logging.debug("[DB Manager] Creating index 'idx_agent_config_key' on agent_config(agent_id, key) if not exists...")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_config_key ON agent_config (agent_id, key)")
             logging.debug("[DB Manager] Index 'idx_agent_config_key' ensured.")
-            # --- END MODIFICATION ---
 
             # Alert Cooldown Table
             logging.debug("[DB Manager] Creating table 'alert_cooldown' if not exists...")
@@ -128,7 +120,7 @@ def init_db(db_path, default_configs={}):
                 )""")
             logging.debug("[DB Manager] Table 'alert_cooldown' ensured.")
 
-            # Users Table (for Portal)
+            # Users Table (for Portal) - Kept for compatibility if Portal uses this DB
             logging.debug("[DB Manager] Creating table 'users' if not exists...")
             cursor.execute("""
                     CREATE TABLE IF NOT EXISTS users (
@@ -138,18 +130,30 @@ def init_db(db_path, default_configs={}):
                     )""")
             logging.debug("[DB Manager] Table 'users' ensured.")
 
-            # Active Agents Table
-            logging.debug("[DB Manager] Creating table 'active_agents' if not exists...")
+            # --- MODIFIED: Active Agents Table ---
+            logging.debug("[DB Manager] Creating/Altering table 'active_agents' if not exists...")
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS active_agents (
-                    agent_id TEXT PRIMARY KEY, -- Unique identifier for the agent instance (could be cluster_name or a generated UUID)
-                    cluster_name TEXT,         -- Name of the cluster the agent belongs to
+                    agent_id TEXT PRIMARY KEY,
+                    cluster_name TEXT,
                     first_seen_timestamp TEXT NOT NULL,
                     last_seen_timestamp TEXT NOT NULL,
-                    agent_version TEXT,        -- Version of the agent software
-                    metadata TEXT              -- JSON string for additional metadata
+                    agent_version TEXT,
+                    metadata TEXT,
+                    k8s_version TEXT,  -- Added column
+                    node_count INTEGER -- Added column
                 )""")
+            # Add columns if they don't exist (for backward compatibility)
+            table_info = cursor.execute("PRAGMA table_info(active_agents)").fetchall()
+            column_names = [col['name'] for col in table_info]
+            if 'k8s_version' not in column_names:
+                cursor.execute("ALTER TABLE active_agents ADD COLUMN k8s_version TEXT")
+                logging.info("[DB Manager] Added 'k8s_version' column to 'active_agents' table.")
+            if 'node_count' not in column_names:
+                cursor.execute("ALTER TABLE active_agents ADD COLUMN node_count INTEGER")
+                logging.info("[DB Manager] Added 'node_count' column to 'active_agents' table.")
             logging.debug("[DB Manager] Table 'active_agents' ensured.")
+            # --- END MODIFICATION ---
             # --- End Table Definitions ---
 
             # Ensure default GLOBAL configs (agent_id is NULL)
@@ -157,11 +161,10 @@ def init_db(db_path, default_configs={}):
                 inserted_count = 0
                 logging.debug("[DB Manager] Inserting default global config values if they don't exist...")
                 for key, value in default_configs.items():
-                    # Insert global config only if it doesn't exist
                     cursor.execute("""
                         INSERT OR IGNORE INTO agent_config (agent_id, key, value)
                         VALUES (NULL, ?, ?)
-                    """, (key, str(value))) # Ensure value is string
+                    """, (key, str(value)))
                     if cursor.rowcount > 0:
                         inserted_count += 1
                 if inserted_count > 0:
@@ -175,11 +178,13 @@ def init_db(db_path, default_configs={}):
         logging.info(f"[DB Manager] Database initialization/check complete at {db_path}")
         return True
     except sqlite3.OperationalError as op_err:
-        # Specific handling for "no such column" which indicates schema mismatch
         if "no such column: agent_id" in str(op_err):
              logging.error(f"[DB Manager] Database schema error during initialization: {op_err}. "
                            f"The 'agent_config' table likely exists with an old structure missing the 'agent_id' column. "
                            f"Consider manually deleting the database file '{db_path}' if this is a new deployment or schema update.", exc_info=True)
+        elif "duplicate column name" in str(op_err):
+             logging.warning(f"[DB Manager] DB init: {op_err}. This is expected if columns already exist.")
+             return True # Continue if columns already exist
         else:
              logging.error(f"[DB Manager] Database operational error during initialization: {op_err}", exc_info=True)
         return False
@@ -192,35 +197,50 @@ def init_db(db_path, default_configs={}):
     finally:
         if conn: conn.close()
 
-# --- Agent Tracking Functions (Keep as is) ---
-def update_agent_heartbeat(db_path, agent_id, cluster_name, timestamp_iso, agent_version=None, metadata=None):
-    """Updates the last seen timestamp for an agent or registers a new one."""
+# --- Agent Tracking Functions ---
+# --- MODIFIED: update_agent_heartbeat ---
+def update_agent_heartbeat(db_path, agent_id, cluster_name, timestamp_iso, agent_version=None, metadata=None, cluster_info=None):
+    """Updates the last seen timestamp and cluster info for an agent or registers a new one."""
     conn = _get_db_connection(db_path)
     if conn is None:
         logging.error(f"[DB Manager] Failed to get DB connection for agent heartbeat {agent_id}"); return
+
+    # Prepare data to be updated/inserted
+    metadata_json = json.dumps(metadata) if metadata else None
+    k8s_version = cluster_info.get('k8s_version', None) if cluster_info else None
+    node_count = cluster_info.get('node_count', None) if cluster_info else None
+
     try:
-        metadata_json = json.dumps(metadata) if metadata else None
         with conn:
             cursor = conn.cursor()
+            # Use INSERT OR CONFLICT to handle both new and existing agents
             cursor.execute('''
-                INSERT INTO active_agents (agent_id, cluster_name, first_seen_timestamp, last_seen_timestamp, agent_version, metadata)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO active_agents (
+                    agent_id, cluster_name, first_seen_timestamp, last_seen_timestamp,
+                    agent_version, metadata, k8s_version, node_count
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(agent_id) DO UPDATE SET
                     last_seen_timestamp = excluded.last_seen_timestamp,
                     cluster_name = excluded.cluster_name,
-                    agent_version = COALESCE(excluded.agent_version, agent_version), -- Keep old version if new is null
-                    metadata = COALESCE(excluded.metadata, metadata) -- Keep old metadata if new is null
-            ''', (agent_id, cluster_name, timestamp_iso, timestamp_iso, agent_version, metadata_json))
-            logging.debug(f"[DB Manager] Updated heartbeat for agent: {agent_id} at {timestamp_iso}")
+                    agent_version = COALESCE(excluded.agent_version, agent_version), -- Keep old if new is null
+                    metadata = COALESCE(excluded.metadata, metadata),             -- Keep old if new is null
+                    k8s_version = COALESCE(excluded.k8s_version, k8s_version),       -- Update if new is provided
+                    node_count = COALESCE(excluded.node_count, node_count)          -- Update if new is provided
+            ''', (agent_id, cluster_name, timestamp_iso, timestamp_iso,
+                  agent_version, metadata_json, k8s_version, node_count))
+            logging.debug(f"[DB Manager] Updated heartbeat/info for agent: {agent_id} at {timestamp_iso} (k8s: {k8s_version}, nodes: {node_count})")
     except sqlite3.Error as e:
         logging.error(f"[DB Manager] Database error updating agent heartbeat for {agent_id}: {e}")
     except Exception as e:
         logging.error(f"[DB Manager] Unexpected error updating agent heartbeat for {agent_id}: {e}", exc_info=True)
     finally:
         if conn: conn.close()
+# --- END MODIFICATION ---
 
+# --- MODIFIED: get_active_agents ---
 def get_active_agents(db_path, timeout_seconds=300):
-    """Retrieves a list of agents seen within the timeout period."""
+    """Retrieves a list of agents seen within the timeout period, including cluster info."""
     agents = []
     conn = _get_db_connection(db_path)
     if conn is None:
@@ -230,8 +250,10 @@ def get_active_agents(db_path, timeout_seconds=300):
         threshold_iso = threshold_time.isoformat()
         with conn:
             cursor = conn.cursor()
+            # Select new columns k8s_version and node_count
             cursor.execute('''
-                SELECT agent_id, cluster_name, first_seen_timestamp, last_seen_timestamp, agent_version, metadata
+                SELECT agent_id, cluster_name, first_seen_timestamp, last_seen_timestamp,
+                       agent_version, metadata, k8s_version, node_count
                 FROM active_agents
                 WHERE last_seen_timestamp >= ?
                 ORDER BY last_seen_timestamp DESC
@@ -239,6 +261,7 @@ def get_active_agents(db_path, timeout_seconds=300):
             rows = cursor.fetchall()
             for row in rows:
                 agent_data = dict(row)
+                # Parse metadata if present
                 if agent_data.get('metadata'):
                     try:
                         agent_data['metadata'] = json.loads(agent_data['metadata'])
@@ -254,6 +277,7 @@ def get_active_agents(db_path, timeout_seconds=300):
     finally:
         if conn: conn.close()
     return agents
+# --- END MODIFICATION ---
 
 def cleanup_inactive_agents(db_path, timeout_seconds=86400):
     """Removes agents not seen for longer than the timeout period."""
@@ -289,7 +313,6 @@ def load_all_global_config(db_path):
     if conn:
         try:
             cursor = conn.cursor()
-            # Select only global settings
             cursor.execute("SELECT key, value FROM agent_config WHERE agent_id IS NULL")
             rows = cursor.fetchall()
             config_from_db = {row['key']: row['value'] for row in rows}
@@ -316,7 +339,6 @@ def save_global_config(db_path, config_dict):
             for key, value in config_dict.items():
                 value_str = str(value) if value is not None else None
                 if value_str is not None:
-                    # Use INSERT OR REPLACE for global settings (agent_id IS NULL)
                     cursor.execute("INSERT OR REPLACE INTO agent_config (agent_id, key, value) VALUES (NULL, ?, ?)", (key, value_str))
                     value_log = value_str[:50] + '...' if len(value_str) > 50 else value_str
                     logging.info(f"Saved global config key='{key}' value='{value_log}'")
@@ -334,7 +356,6 @@ def save_global_config(db_path, config_dict):
 
 
 # --- Agent-Specific Configuration Functions ---
-
 def load_agent_config(db_path, agent_id):
     """Loads configuration settings specifically for a given agent_id."""
     config_from_db = {}
@@ -342,7 +363,6 @@ def load_agent_config(db_path, agent_id):
     if conn:
         try:
             cursor = conn.cursor()
-            # Select settings for the specific agent_id
             cursor.execute("SELECT key, value FROM agent_config WHERE agent_id = ?", (agent_id,))
             rows = cursor.fetchall()
             config_from_db = {row['key']: row['value'] for row in rows}
@@ -373,7 +393,6 @@ def save_agent_config(db_path, agent_id, config_dict):
             for key, value in config_dict.items():
                 value_str = str(value) if value is not None else None
                 if value_str is not None:
-                    # Use INSERT OR REPLACE with the specific agent_id
                     cursor.execute("INSERT OR REPLACE INTO agent_config (agent_id, key, value) VALUES (?, ?, ?)", (agent_id, key, value_str))
                     value_log = value_str[:50] + '...' if len(value_str) > 50 else value_str
                     logging.info(f"Saved config for agent='{agent_id}' key='{key}' value='{value_log}'")
@@ -392,7 +411,7 @@ def save_agent_config(db_path, agent_id, config_dict):
 
 # --- Incident and Cooldown Functions ---
 def record_incident(db_path, pod_key, severity, summary, initial_reasons, k8s_context, sample_logs,
-                    alert_severity_levels, # No longer used for counting, but kept for function signature consistency
+                    alert_severity_levels, # Kept for signature consistency, but not used for counting
                     input_prompt=None, raw_ai_response=None, root_cause=None, troubleshooting_steps=None):
     """Records an incident in the database and updates the daily incident count."""
     timestamp_str = datetime.now(timezone.utc).isoformat()
@@ -402,7 +421,6 @@ def record_incident(db_path, pod_key, severity, summary, initial_reasons, k8s_co
     try:
         with conn:
             cursor = conn.cursor()
-            # Insert the incident details
             cursor.execute('''
                 INSERT INTO incidents (
                     timestamp, pod_key, severity, summary, initial_reasons,
@@ -414,14 +432,11 @@ def record_incident(db_path, pod_key, severity, summary, initial_reasons, k8s_co
                     root_cause, troubleshooting_steps))
             logging.info(f"[DB Manager] Recorded incident for {pod_key} with severity {severity}")
 
-            # --- FIX: Always update daily incident count, regardless of severity ---
+            # Always update daily incident count, regardless of severity
             today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-            # Ensure the row for today exists in daily_stats
             cursor.execute('INSERT OR IGNORE INTO daily_stats (date) VALUES (?)', (today_str,))
-            # Increment the incident count for today
             cursor.execute('UPDATE daily_stats SET incident_count = incident_count + 1 WHERE date = ?', (today_str,))
             logging.debug(f"[DB Manager] Incremented daily incident count for {today_str}.")
-            # --- END FIX ---
 
     except sqlite3.Error as e:
         logging.error(f"[DB Manager] Database error recording incident for {pod_key}: {e}")
@@ -434,7 +449,7 @@ def is_pod_in_cooldown(db_path, pod_key):
     """Checks if a specific pod (including cluster) is currently in alert cooldown."""
     conn = _get_db_connection(db_path)
     if conn is None:
-        logging.error(f"[DB Manager] Failed to get DB connection checking cooldown for {pod_key}"); return False # Assume not in cooldown if DB fails
+        logging.error(f"[DB Manager] Failed to get DB connection checking cooldown for {pod_key}"); return False
     try:
         now_iso = datetime.now(timezone.utc).isoformat()
         with conn:
@@ -447,11 +462,10 @@ def is_pod_in_cooldown(db_path, pod_key):
                     logging.info(f"[DB Manager] Pod {pod_key} is in cooldown until {cooldown_until_str}.")
                     return True
                 else:
-                    # Cooldown expired, remove the entry
                     cursor.execute("DELETE FROM alert_cooldown WHERE pod_key = ?", (pod_key,))
                     logging.info(f"[DB Manager] Cooldown expired for pod {pod_key} (was {cooldown_until_str}).")
                     return False
-            return False # No cooldown entry found
+            return False
     except sqlite3.Error as e:
         logging.error(f"[DB Manager] Database error checking cooldown for {pod_key}: {e}"); return False
     except Exception as e:
@@ -463,7 +477,7 @@ def set_pod_cooldown(db_path, pod_key, cooldown_minutes):
     """Sets the alert cooldown period for a specific pod."""
     if cooldown_minutes <= 0:
          logging.debug(f"[DB Manager] Cooldown minutes is {cooldown_minutes}. Skipping setting cooldown for {pod_key}.")
-         return # Don't set cooldown if duration is zero or negative
+         return
 
     conn = _get_db_connection(db_path)
     if conn is None:
@@ -473,7 +487,6 @@ def set_pod_cooldown(db_path, pod_key, cooldown_minutes):
         cooldown_until_iso = cooldown_until.isoformat()
         with conn:
             cursor = conn.cursor()
-            # Insert or replace the cooldown entry
             cursor.execute("INSERT OR REPLACE INTO alert_cooldown (pod_key, cooldown_until) VALUES (?, ?)",
                             (pod_key, cooldown_until_iso))
             logging.info(f"[DB Manager] Set cooldown for pod {pod_key} until {cooldown_until_iso} ({cooldown_minutes} minutes)")
@@ -484,7 +497,7 @@ def set_pod_cooldown(db_path, pod_key, cooldown_minutes):
     finally:
         if conn: conn.close()
 
-# --- Stats and Namespace Cache Functions (Keep as is) ---
+# --- Stats and Namespace Cache Functions ---
 def update_daily_stats(db_path):
     """Updates daily counters for model calls and Telegram alerts."""
     calls_to_add = 0
@@ -502,7 +515,7 @@ def update_daily_stats(db_path):
 
     if calls_to_add == 0 and alerts_to_add == 0:
         logging.debug("[DB Manager] No new model calls or alerts to update in daily stats.")
-        return # No need to update if counters are zero
+        return
 
     today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     conn = _get_db_connection(db_path)
@@ -511,9 +524,7 @@ def update_daily_stats(db_path):
     try:
         with conn:
             cursor = conn.cursor()
-            # Ensure the row for today exists
             cursor.execute('INSERT OR IGNORE INTO daily_stats (date) VALUES (?)', (today_str,))
-            # Update the counters
             cursor.execute('''
                 UPDATE daily_stats
                 SET model_calls = model_calls + ?, telegram_alerts = telegram_alerts + ?
@@ -539,11 +550,8 @@ def update_available_namespaces_in_db(db_path, namespaces):
     try:
         with conn:
             cursor = conn.cursor()
-            # Prepare placeholders for efficient deletion check
             placeholders = ','.join('?' * len(namespaces))
-            # Delete namespaces from cache that are no longer in the provided list
             cursor.execute(f"DELETE FROM available_namespaces WHERE name NOT IN ({placeholders})", tuple(namespaces))
-            # Insert or update the current list of namespaces
             for ns in namespaces:
                 cursor.execute("INSERT OR REPLACE INTO available_namespaces (name, last_seen) VALUES (?, ?)", (ns, timestamp))
             logging.info(f"[DB Manager] Updated available_namespaces cache in DB with {len(namespaces)} namespaces.")
