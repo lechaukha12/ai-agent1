@@ -390,11 +390,11 @@ def save_agent_config(db_path, agent_id, config_dict):
          if conn: conn.close()
 
 
-# --- Incident and Cooldown Functions (Mostly unchanged, ensure pod_key includes cluster) ---
+# --- Incident and Cooldown Functions ---
 def record_incident(db_path, pod_key, severity, summary, initial_reasons, k8s_context, sample_logs,
-                    alert_severity_levels, # Keep for checking if incident counts towards stats
+                    alert_severity_levels, # No longer used for counting, but kept for function signature consistency
                     input_prompt=None, raw_ai_response=None, root_cause=None, troubleshooting_steps=None):
-    """Records an incident in the database."""
+    """Records an incident in the database and updates the daily incident count."""
     timestamp_str = datetime.now(timezone.utc).isoformat()
     conn = _get_db_connection(db_path)
     if conn is None:
@@ -402,6 +402,7 @@ def record_incident(db_path, pod_key, severity, summary, initial_reasons, k8s_co
     try:
         with conn:
             cursor = conn.cursor()
+            # Insert the incident details
             cursor.execute('''
                 INSERT INTO incidents (
                     timestamp, pod_key, severity, summary, initial_reasons,
@@ -411,14 +412,17 @@ def record_incident(db_path, pod_key, severity, summary, initial_reasons, k8s_co
             ''', (timestamp_str, pod_key, severity, summary, initial_reasons,
                     k8s_context, sample_logs, input_prompt, raw_ai_response,
                     root_cause, troubleshooting_steps))
-
-            # Update daily incident count if severity meets global alert levels
-            # Note: Alerting logic itself should use agent-specific config if implemented
-            if severity in alert_severity_levels:
-                today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-                cursor.execute('INSERT OR IGNORE INTO daily_stats (date) VALUES (?)', (today_str,))
-                cursor.execute('UPDATE daily_stats SET incident_count = incident_count + 1 WHERE date = ?', (today_str,))
             logging.info(f"[DB Manager] Recorded incident for {pod_key} with severity {severity}")
+
+            # --- FIX: Always update daily incident count, regardless of severity ---
+            today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+            # Ensure the row for today exists in daily_stats
+            cursor.execute('INSERT OR IGNORE INTO daily_stats (date) VALUES (?)', (today_str,))
+            # Increment the incident count for today
+            cursor.execute('UPDATE daily_stats SET incident_count = incident_count + 1 WHERE date = ?', (today_str,))
+            logging.debug(f"[DB Manager] Incremented daily incident count for {today_str}.")
+            # --- END FIX ---
+
     except sqlite3.Error as e:
         logging.error(f"[DB Manager] Database error recording incident for {pod_key}: {e}")
     except Exception as e:
