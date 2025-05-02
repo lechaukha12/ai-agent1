@@ -57,12 +57,12 @@ const sidebarItems = document.querySelectorAll('.sidebar-item');
 const modalCloseButton = document.getElementById('modal-close-button'); // Incident modal close
 const incidentModalElement = document.getElementById('incident-modal'); // Reference for incident modal overlay click
 
-// Agent Monitoring Page Elements (Cập nhật ID tham chiếu nếu cần)
-const agentContentSection = document.getElementById('agent-content'); // Đã đổi ID trong HTML
+// Agent Monitoring Page Elements (Use the new ID 'agent-content')
+const agentContentSection = document.getElementById('agent-content'); // Changed ID
 const agentStatusTableBody = document.getElementById('agent-status-table-body');
 const agentStatusErrorElem = document.getElementById('agent-status-error');
 const refreshAgentStatusButton = document.getElementById('refresh-agent-status-button');
-const addAgentButton = document.getElementById('add-agent-button'); // Thêm nút mới
+const addAgentButton = document.getElementById('add-agent-button'); // New button reference
 
 // Agent Configuration Section Elements
 const agentConfigSection = document.getElementById('agent-config-section');
@@ -322,7 +322,7 @@ async function loadIncidentsData(forceReload = false) {
                 };
 
                 row.appendChild(createCell(ui.formatVietnameseDateTime(incident.timestamp)));
-                row.appendChild(createCell(incident.pod_key));
+                row.appendChild(createCell(incident.pod_key)); // Giữ nguyên hiển thị pod_key, nhưng cột đã đổi tên
                 row.appendChild(createCell(ui.createSeverityBadge(incident.severity), true));
                 row.appendChild(createCell(incident.summary, false, true));
                 row.appendChild(createCell(incident.initial_reasons, false, true));

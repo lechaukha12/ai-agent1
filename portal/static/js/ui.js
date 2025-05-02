@@ -256,7 +256,7 @@ export function closeModal() {
 // --- Section Activation ---
 /**
  * Sets the active section in the UI, hides others, and calls a callback to load data.
- * @param {string} targetId - The ID of the section to activate (e.g., 'dashboard').
+ * @param {string} targetId - The ID of the section to activate (e.g., 'dashboard', 'agent').
  * @param {function} loadSectionDataCallback - Callback function to load data for the section.
  */
 export function setActiveSection(targetId, loadSectionDataCallback) {
@@ -305,7 +305,7 @@ export function renderAgentStatusTable(agents, configureCallback, currentUserRol
 
     if (!agents || agents.length === 0) {
         // Display message if no agents are active, adjust colspan
-        agentStatusTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-500">Không có agent nào đang hoạt động.</td></tr>`;
+        agentStatusTableBody.innerHTML = `<tr><td colspan="5" class="text-center py-6 text-gray-500">Không có agent nào đang hoạt động.</td></tr>`; // Adjusted colspan to 5
         return;
     }
 
@@ -422,6 +422,7 @@ if (addAgentModalCloseButton) {
 if (addAgentModalUnderstandButton) {
     addAgentModalUnderstandButton.addEventListener('click', closeAddAgentModal);
 }
+// Close on overlay click for addAgentModal is handled in main.js
 
 
 // --- User Management UI ---

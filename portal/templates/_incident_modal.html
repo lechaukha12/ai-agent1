@@ -1,32 +1,45 @@
 <div id="incident-modal" class="modal-overlay">
-    <div class="modal-content bg-white"> <div class="flex justify-between items-center mb-5 border-b border-gray-200 pb-3"> <h3 class="text-xl font-semibold text-gray-900" id="modal-title">Chi tiết Sự cố</h3> <button id="modal-close-button" class="text-gray-400 hover:text-gray-600 transition-colors"> <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+    <div class="modal-content bg-white">
+        <div class="flex justify-between items-center mb-5 border-b border-gray-200 pb-3">
+            <h3 class="text-xl font-semibold text-gray-900" id="modal-title">Chi tiết Sự cố</h3>
+            <button id="modal-close-button" class="text-gray-400 hover:text-gray-600 transition-colors">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
             </button>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 mb-5">
-            <div><span class="modal-label">Thời gian</span><span class="modal-value-simple modal-value-block text-gray-800" id="modal-timestamp"></span></div> <div><span class="modal-label">Pod</span><span class="modal-value-simple modal-value-block text-gray-800" id="modal-pod-key"></span></div> <div><span class="modal-label">Mức độ</span><span class="modal-value-simple modal-value-block" id="modal-severity"></span></div>
-            <div><span class="modal-label">Lý do phát hiện</span><span class="modal-value-simple modal-value-block text-gray-800" id="modal-initial-reasons"></span></div> </div>
+            <div><span class="modal-label">Thời gian</span><span class="modal-value-simple modal-value-block text-gray-800" id="modal-timestamp"></span></div>
+            <div><span class="modal-label">Tài nguyên</span><span class="modal-value-simple modal-value-block text-gray-800" id="modal-pod-key"></span></div>
+            <div><span class="modal-label">Mức độ</span><span class="modal-value-simple modal-value-block" id="modal-severity"></span></div>
+            <div><span class="modal-label">Lý do phát hiện</span><span class="modal-value-simple modal-value-block text-gray-800" id="modal-initial-reasons"></span></div>
+        </div>
 
         <div class="modal-section">
             <span class="modal-label">Tóm tắt</span>
-            <p class="modal-value-simple text-gray-800" id="modal-summary"></p> </div>
-        <div class="modal-section">
-            <span class="modal-label">Nguyên nhân gốc có thể</span>
-            <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-root-cause"></div> </div>
-        <div class="modal-section">
+            <p class="modal-value-simple text-gray-800" id="modal-summary"></p>
+        </div>
+        <div class="modal-section ai-details" style="display: none;"> <span class="modal-label">Nguyên nhân gốc có thể</span>
+            <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-root-cause"></div>
+        </div>
+        <div class="modal-section ai-details" style="display: none;">
             <span class="modal-label">Đề xuất khắc phục</span>
-            <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-troubleshooting-steps"></div> </div>
+            <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-troubleshooting-steps"></div>
+        </div>
         <div class="modal-section">
             <span class="modal-label">Log mẫu</span>
-            <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-sample-logs"></div> </div>
+            <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-sample-logs"></div>
+        </div>
         <div class="modal-section">
-            <span class="modal-label">Ngữ cảnh Kubernetes</span>
-            <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-k8s-context"></div> </div>
-        <div class="modal-section">
+            <span class="modal-label">Ngữ cảnh Môi trường</span>
+            <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-k8s-context"></div>
+        </div>
+        <div class="modal-section ai-details" style="display: none;">
             <span class="modal-label">Prompt đã gửi cho AI</span>
-            <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-input-prompt"></div> </div>
-        <div class="modal-section">
+            <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-input-prompt"></div>
+        </div>
+        <div class="modal-section ai-details" style="display: none;">
             <span class="modal-label">Phản hồi thô từ AI</span>
-            <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-raw-ai-response"></div> </div>
+            <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-raw-ai-response"></div>
+        </div>
     </div>
 </div>
