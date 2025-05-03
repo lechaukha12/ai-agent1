@@ -1,11 +1,8 @@
-# ai-agent1/k8s-manifest/rbac.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  # Giữ nguyên tên Service Account hoặc đổi nếu muốn, nhưng phải khớp với deployment.yaml
-  name: k8s-log-agent-sa
-  namespace: kube-observability # Đảm bảo đúng namespace
-
+  name: k8s-log-agent-sa # Đổi tên Service Account
+  namespace: kube-observability # Đổi namespace của agent
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
