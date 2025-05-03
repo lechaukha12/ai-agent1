@@ -1,3 +1,4 @@
+# ai-agent1/obsengine/notifier.py
 import requests
 import logging
 import threading
@@ -19,7 +20,6 @@ except Exception as e:
     logging.warning(f"[Notifier] Could not load timezone '{os.environ.get('TZ', 'Asia/Ho_Chi_Minh')}': {e}. Defaulting display to UTC.")
     HCM_TZ = timezone.utc
 
-
 def send_telegram_alert(bot_token, chat_id, alert_data, ai_enabled):
     global telegram_alerts_counter
 
@@ -31,7 +31,9 @@ def send_telegram_alert(bot_token, chat_id, alert_data, ai_enabled):
         telegram_alerts_counter += 1
         current_alert_count = telegram_alerts_counter
 
-    logging.info(f"[Notifier] Attempting to send Telegram alert #{current_alert_count} for {alert_data.get('pod_key', 'N/A')}")
+    pod_key = alert_data.get('pod_key', 'N/A')
+    agent_id = alert_data.get('agent_id', 'N/A') # Lấy agent_id từ alert_data
+    logging.info(f"[Notifier] Attempting to send Telegram alert #{current_alert_count} for {pod_key} (Agent: {agent_id})")
     telegram_api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
     summary = alert_data.get('summary', 'N/A')
@@ -41,7 +43,8 @@ def send_telegram_alert(bot_token, chat_id, alert_data, ai_enabled):
         summary = f"Phát hiện sự cố {severity}. Lý do: {initial_reasons}. (AI tắt)"
 
     message_lines = [
-        f"🚨 *Cảnh báo K8s/Log (Pod: {alert_data.get('pod_key', 'N/A')})* 🚨",
+        f"🚨 *Cảnh báo K8s/Log (Agent: `{agent_id}`)* 🚨", # Thêm Agent ID vào tiêu đề
+        f"*Tài nguyên:* `{pod_key}`", # Đổi tên dòng này
         f"*Mức độ:* `{alert_data.get('severity', 'UNKNOWN')}`",
         f"*Tóm tắt:* {summary}"
     ]
@@ -77,7 +80,7 @@ def send_telegram_alert(bot_token, chat_id, alert_data, ai_enabled):
         safe_truncate_pos = message.rfind('\n', 0, max_len - 100)
         if safe_truncate_pos == -1: safe_truncate_pos = max_len - 100
         truncated_message = message[:safe_truncate_pos] + "\n\n_[... message truncated ...]_"
-        logging.warning(f"[Notifier] Alert message for {alert_data.get('pod_key')} exceeded Telegram limit and was truncated.")
+        logging.warning(f"[Notifier] Alert message for {pod_key} (Agent: {agent_id}) exceeded Telegram limit and was truncated.")
 
     payload = {
         'chat_id': chat_id,
@@ -90,18 +93,18 @@ def send_telegram_alert(bot_token, chat_id, alert_data, ai_enabled):
         response.raise_for_status()
         response_data = response.json()
         if response_data.get('ok'):
-            logging.info(f"[Notifier] Sent alert to Telegram for {alert_data.get('pod_key')}. Response OK.")
+            logging.info(f"[Notifier] Sent alert to Telegram for {pod_key} (Agent: {agent_id}). Response OK.")
             alert_sent_successfully = True
         else:
-            logging.error(f"[Notifier] Telegram API returned error for {alert_data.get('pod_key')}: {response_data.get('description')}")
+            logging.error(f"[Notifier] Telegram API returned error for {pod_key} (Agent: {agent_id}): {response_data.get('description')}")
             with notifier_lock:
                 if telegram_alerts_counter > 0: telegram_alerts_counter -= 1
     except requests.exceptions.RequestException as e:
-        logging.error(f"[Notifier] Error sending Telegram alert for {alert_data.get('pod_key')}: {e}")
+        logging.error(f"[Notifier] Error sending Telegram alert for {pod_key} (Agent: {agent_id}): {e}")
         with notifier_lock:
             if telegram_alerts_counter > 0: telegram_alerts_counter -= 1
     except Exception as e:
-        logging.error(f"[Notifier] An unexpected error occurred during Telegram send for {alert_data.get('pod_key')}: {e}", exc_info=True)
+        logging.error(f"[Notifier] An unexpected error occurred during Telegram send for {pod_key} (Agent: {agent_id}): {e}", exc_info=True)
         with notifier_lock:
             if telegram_alerts_counter > 0: telegram_alerts_counter -= 1
 

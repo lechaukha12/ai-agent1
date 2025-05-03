@@ -9,12 +9,10 @@ import math
 import sqlite3
 from flask import Flask, request, jsonify, abort
 from datetime import datetime, timezone, timedelta
-from kubernetes import client, config
+from kubernetes import client, config as k8s_config
 from kubernetes.client.exceptions import ApiException
-# Import the correct functions for parsing and formatting resource quantities
 from kubernetes.utils.quantity import parse_quantity, format_quantity
 
-# Setup Python path
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
@@ -22,7 +20,6 @@ PARENT_DIR = os.path.dirname(APP_DIR)
 if PARENT_DIR not in sys.path:
      sys.path.insert(0, PARENT_DIR)
 
-# Configure logging
 log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=log_level,
                     format='%(asctime)s - %(levelname)s - %(name)s:%(lineno)d - %(message)s',
@@ -31,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 logger.info(f"--- ObsEngine app.py starting execution (Log Level: {log_level}) ---")
 
-# Import custom modules
 try:
     logger.info("Importing obsengine_config...")
     import obsengine_config
@@ -52,7 +48,6 @@ except Exception as e:
     logger.critical(f"Unexpected error during imports: {e}", exc_info=True)
     sys.exit("Unexpected error during imports.")
 
-# Create Flask app
 logger.info("Creating Flask app instance...")
 try:
     app = Flask(__name__)
@@ -61,23 +56,20 @@ except Exception as e:
     logger.critical(f"Failed to create Flask app instance: {e}", exc_info=True)
     sys.exit("Flask app creation failed.")
 
-# Initialize Kubernetes client (used for /api/namespaces fallback)
 k8s_client_initialized_obs = False
 k8s_core_v1_obs = None
-k8s_version_api_obs = None # Keep for potential future use, but not needed for current logic
+k8s_version_api_obs = None
 try:
     logger.info("Attempting to initialize K8s client for ObsEngine (for fallback)...")
-    config.load_incluster_config()
+    k8s_config.load_incluster_config()
     k8s_core_v1_obs = client.CoreV1Api()
-    # k8s_version_api_obs = client.VersionApi() # No longer needed for cluster info endpoint
     k8s_client_initialized_obs = True
     logger.info("K8s client initialized successfully for ObsEngine (in-cluster).")
-except config.ConfigException:
+except k8s_config.ConfigException:
     logger.warning("In-cluster K8s config failed for ObsEngine, trying kubeconfig...")
     try:
-        config.load_kube_config()
+        k8s_config.load_kube_config()
         k8s_core_v1_obs = client.CoreV1Api()
-        # k8s_version_api_obs = client.VersionApi()
         k8s_client_initialized_obs = True
         logger.info("K8s client initialized successfully for ObsEngine (kubeconfig).")
     except Exception as e_kube:
@@ -85,7 +77,6 @@ except config.ConfigException:
 except Exception as e_global:
      logger.error(f"Unexpected error initializing K8s client for ObsEngine: {e_global}", exc_info=True)
 
-# Get database path
 logger.info("Getting DB path from obsengine_config...")
 try:
     DB_PATH = obsengine_config.get_db_path()
@@ -95,24 +86,26 @@ except Exception as e:
     DB_PATH = "/data/fallback_obsengine_data.db"
     logger.warning(f"Using fallback DB path: {DB_PATH}")
 
-# Function to get initial default values for global database settings
 def get_initial_global_db_defaults():
      logger.debug("Getting initial GLOBAL DB defaults...")
      defaults = {
          'enable_telegram_alerts': str(getattr(obsengine_config, 'DEFAULT_ENABLE_TELEGRAM_ALERTS', False)).lower(),
          'telegram_chat_id': getattr(obsengine_config, 'DEFAULT_TELEGRAM_CHAT_ID', ''),
-         'enable_ai_analysis': str(getattr(obsengine_config, 'DEFAULT_ENABLE_AI_ANALYSIS', True)).lower(),
+         'enable_ai_analysis': str(getattr(obsengine_config, 'DEFAULT_ENABLE_AI_ANALYSIS', False)).lower(), # Giữ False mặc định
          'ai_provider': getattr(obsengine_config, 'DEFAULT_AI_PROVIDER', 'gemini').lower(),
          'ai_model_identifier': getattr(obsengine_config, 'DEFAULT_AI_MODEL_IDENTIFIER', 'gemini-1.5-flash'),
          'local_gemini_endpoint': getattr(obsengine_config, 'DEFAULT_LOCAL_GEMINI_ENDPOINT', ''),
          'prompt_template': getattr(obsengine_config, 'DEFAULT_PROMPT_TEMPLATE', "Default Prompt Missing"),
          'alert_severity_levels': getattr(obsengine_config, 'DEFAULT_ALERT_SEVERITY_LEVELS_STR', "WARNING,ERROR,CRITICAL"),
          'alert_cooldown_minutes': str(getattr(obsengine_config, 'DEFAULT_ALERT_COOLDOWN_MINUTES', 30)),
+         'scan_interval_seconds': str(getattr(obsengine_config, 'DEFAULT_SCAN_INTERVAL_SECONDS', 30)),
+         'restart_count_threshold': str(getattr(obsengine_config, 'DEFAULT_RESTART_COUNT_THRESHOLD', 5)),
+         'loki_scan_min_level': getattr(obsengine_config, 'DEFAULT_LOKI_SCAN_MIN_LEVEL', 'INFO').upper(),
+         'monitored_namespaces': json.dumps(getattr(obsengine_config, 'DEFAULT_MONITORED_NAMESPACES_STR', "kube-system,default").split(','))
      }
      logger.debug(f"Initial GLOBAL DB defaults generated: {defaults}")
      return defaults
 
-# Initialize the database
 logger.info("Initializing database via db_manager.init_db...")
 try:
     if not db_manager.init_db(DB_PATH, get_initial_global_db_defaults()):
@@ -122,7 +115,6 @@ try:
 except Exception as e:
     logger.critical(f"Exception during db_manager.init_db call: {e}", exc_info=True)
 
-# Function for periodic background tasks
 def periodic_background_tasks_thread():
     try:
         interval = int(getattr(obsengine_config, 'DEFAULT_STATS_UPDATE_INTERVAL_SECONDS', 300))
@@ -152,7 +144,6 @@ def periodic_background_tasks_thread():
     except Exception as thread_init_err:
          logger.error(f"Error initializing periodic_background_tasks_thread: {thread_init_err}", exc_info=True)
 
-# Start the background tasks thread
 logger.info("Attempting to start background tasks thread...")
 try:
     background_thread = threading.Thread(target=periodic_background_tasks_thread, daemon=True)
@@ -161,15 +152,11 @@ try:
 except Exception as e:
     logger.error(f"Failed to start background tasks thread: {e}", exc_info=True)
 
-
-# --- Flask Routes ---
-
 @app.route('/healthz')
 def healthz():
     logger.debug("Health check endpoint called.")
     return "OK", 200
 
-# --- MODIFIED: /collect endpoint ---
 @app.route('/collect', methods=['POST'])
 def collect_data():
     received_time = datetime.now(timezone.utc)
@@ -184,7 +171,7 @@ def collect_data():
         logger.error(f"Error getting or parsing JSON data: {e}", exc_info=True)
         return jsonify({"error": "Failed to parse JSON data"}), 400
 
-    # --- MODIFIED: Added 'cluster_info' to required fields ---
+    # Thêm 'agent_version' vào danh sách các trường có thể có (không bắt buộc)
     required_fields = ["pod_key", "k8s_context", "logs", "initial_reasons",
                        "collection_timestamp", "agent_id", "cluster_name", "cluster_info"]
     missing_fields = [field for field in required_fields if field not in data]
@@ -193,46 +180,46 @@ def collect_data():
         logger.error(f"Validation failed: {error_msg}")
         return jsonify({"error": error_msg}), 400
 
-    # Extract data
     pod_key = data.get("pod_key")
     k8s_context = data.get("k8s_context")
     logs = data.get("logs", [])
     initial_reasons = data.get("initial_reasons", [])
     agent_id = data.get("agent_id")
     cluster_name = data.get("cluster_name")
-    # --- ADDED: Extract cluster_info ---
-    cluster_info = data.get("cluster_info") # Expected format: {"k8s_version": "...", "node_count": ...}
+    cluster_info = data.get("cluster_info")
+    # --- LẤY AGENT_VERSION TỪ PAYLOAD ---
+    agent_version = data.get("agent_version") # Lấy version, có thể là None
+    # -----------------------------------
+
+    if not agent_id:
+         logger.error("Validation failed: 'agent_id' is missing or empty.")
+         return jsonify({"error": "Missing required field: agent_id"}), 400
 
     full_pod_key = f"{cluster_name}/{pod_key}" if cluster_name else pod_key
-    logger.info(f"Processing data for pod: {full_pod_key} from Agent: {agent_id}")
+    logger.info(f"Processing data for pod: {full_pod_key} from Agent: {agent_id} (Version: {agent_version or 'N/A'})") # Log version
 
-    # --- MODIFIED: Update agent heartbeat with cluster_info ---
     try:
-        # Pass cluster_info to the updated db_manager function
+        # --- TRUYỀN agent_version VÀO HÀM UPDATE ---
         db_manager.update_agent_heartbeat(DB_PATH, agent_id, cluster_name,
-                                          received_time.isoformat(), cluster_info=cluster_info)
+                                          received_time.isoformat(),
+                                          agent_version=agent_version, # Truyền version vào đây
+                                          cluster_info=cluster_info)
+        # ------------------------------------------
     except Exception as heartbeat_err:
         logger.error(f"Failed to update heartbeat/info for agent {agent_id}: {heartbeat_err}", exc_info=True)
-    # --- END MODIFICATION ---
 
     try:
-        # Load configurations
-        global_ai_config = obsengine_config.get_ai_config()
-        global_alert_config = obsengine_config.get_alert_config()
+        agent_specific_config = db_manager.load_agent_config(DB_PATH, agent_id)
+        current_ai_config = obsengine_config.get_ai_config()
+        current_alert_config = obsengine_config.get_alert_config()
         db_path_local = obsengine_config.get_db_path()
 
-        # Use global config for now
-        current_ai_config = global_ai_config
-        current_alert_config = global_alert_config
-
-        # Perform analysis
-        logger.debug(f"[{full_pod_key}] Performing analysis (using global config)...")
+        logger.debug(f"[{full_pod_key}] Performing analysis (Agent: {agent_id})...")
         analysis_result, final_prompt, raw_response_text = ai_providers.perform_analysis(
-            logs, k8s_context, "; ".join(initial_reasons), current_ai_config, current_ai_config.get('prompt_template')
+            logs, k8s_context, initial_reasons, current_ai_config, current_ai_config.get('prompt_template')
         )
         logger.debug(f"[{full_pod_key}] Analysis complete.")
 
-        # Extract results
         severity = analysis_result.get("severity", "UNKNOWN").upper()
         summary = analysis_result.get("summary", "N/A")
         root_cause_raw = analysis_result.get("root_cause", "N/A")
@@ -241,17 +228,17 @@ def collect_data():
         steps = "\n".join(steps_raw) if isinstance(steps_raw, list) else str(steps_raw)
         logger.info(f"[{full_pod_key}] Analysis result: Severity={severity}")
 
-        # Record incident
         logger.debug(f"[{full_pod_key}] Recording incident...")
         sample_logs_str = "\n".join([f"- {log.get('message', '')[:150]}" for log in logs[:5]]) if logs else "-"
+        initial_reasons_str = "; ".join(initial_reasons)
         db_manager.record_incident(
-            db_path_local, full_pod_key, severity, summary, "; ".join(initial_reasons),
-            k8s_context, sample_logs_str, global_alert_config.get('alert_severity_levels', []),
+            db_path_local, full_pod_key, severity, summary, initial_reasons_str,
+            k8s_context, sample_logs_str,
+            current_alert_config.get('alert_severity_levels', []),
             final_prompt, raw_response_text, root_cause, steps
         )
         logger.debug(f"[{full_pod_key}] Incident recorded.")
 
-        # Check alert conditions
         alert_levels = current_alert_config.get('alert_severity_levels', [])
         cooldown_minutes = current_alert_config.get('alert_cooldown_minutes', 30)
         logger.debug(f"[{full_pod_key}] Checking alert conditions (Severity: {severity}, Levels: {alert_levels})...")
@@ -260,17 +247,17 @@ def collect_data():
             logger.debug(f"[{full_pod_key}] Checking cooldown...")
             if not db_manager.is_pod_in_cooldown(db_path_local, full_pod_key):
                 logger.info(f"[{full_pod_key}] Not in cooldown. Processing alert.")
-                if global_alert_config.get('enable_telegram_alerts'):
-                    bot_token = global_alert_config.get('telegram_bot_token')
-                    chat_id = global_alert_config.get('telegram_chat_id')
+                if current_alert_config.get('enable_telegram_alerts'):
+                    bot_token = current_alert_config.get('telegram_bot_token')
+                    chat_id = current_alert_config.get('telegram_chat_id')
                     if bot_token and chat_id:
                         logger.debug(f"[{full_pod_key}] Sending Telegram alert...")
                         alert_time_hcm = received_time.astimezone(getattr(notifier, 'HCM_TZ', timezone.utc))
                         time_format = '%Y-%m-%d %H:%M:%S %Z'
                         alert_data = {
-                            'pod_key': full_pod_key, 'cluster_name': cluster_name,
+                            'pod_key': full_pod_key, 'cluster_name': cluster_name, 'agent_id': agent_id,
                             'severity': severity, 'summary': summary, 'root_cause': root_cause,
-                            'troubleshooting_steps': steps, 'initial_reasons': "; ".join(initial_reasons),
+                            'troubleshooting_steps': steps, 'initial_reasons': initial_reasons_str,
                             'alert_time': alert_time_hcm.strftime(time_format), 'sample_logs': sample_logs_str
                         }
                         alert_sent = notifier.send_telegram_alert(
@@ -298,25 +285,19 @@ def collect_data():
     except Exception as e:
         logger.error(f"--- Error processing data for pod {full_pod_key} from Agent {agent_id}: {e} ---", exc_info=True)
         return jsonify({"error": f"Internal server error processing data for {full_pod_key}"}), 500
-# --- END MODIFICATION ---
 
-
-# --- MODIFIED: /api/agents/status endpoint ---
+# --- Giữ nguyên các hàm API khác ---
 @app.route('/api/agents/status', methods=['GET'])
 def get_agent_status():
     logger.info("--- /api/agents/status endpoint hit ---")
     try:
         agent_timeout = 300
-        # get_active_agents now returns cluster info as well
         active_agents = db_manager.get_active_agents(DB_PATH, agent_timeout)
         logger.info(f"Returning status for {len(active_agents)} active agents.")
-        # The response now includes k8s_version and node_count per agent
         return jsonify({"active_agents": active_agents}), 200
     except Exception as e:
         logger.error(f"Error getting agent status: {e}", exc_info=True)
         return jsonify({"error": "Failed to retrieve agent status"}), 500
-# --- END MODIFICATION ---
-
 
 @app.route('/api/incidents', methods=['GET'])
 def get_incidents_api():
@@ -351,7 +332,6 @@ def get_incidents_api():
         total_pages = math.ceil(total_count / per_page) if per_page > 0 else 0; pagination = {"page": page, "per_page": per_page, "total_items": total_count, "total_pages": total_pages}; logger.info(f"Returning {len(incidents)} incidents (Page {page}/{total_pages})"); return jsonify({"incidents": incidents, "pagination": pagination})
     except Exception as e: logger.error(f"Error in /api/incidents: {e}", exc_info=True); return jsonify({"error": "Failed to retrieve incidents"}), 500
 
-
 @app.route('/api/stats', methods=['GET'])
 def get_stats_api():
     logger.info("--- /api/stats endpoint hit ---")
@@ -375,7 +355,6 @@ def get_stats_api():
         logger.info(f"Returning stats data for last {days} days."); return jsonify(stats)
     except Exception as e: logger.error(f"Error in /api/stats: {e}", exc_info=True); return jsonify({"error": "Failed to retrieve stats"}), 500
 
-
 @app.route('/api/config/all', methods=['GET'])
 def get_all_config_api():
     logger.info("--- GET /api/config/all endpoint hit ---")
@@ -391,13 +370,24 @@ def get_all_config_api():
             try: safe_config['alert_severity_levels'] = [lvl.strip().upper() for lvl in alert_levels_str.split(',') if lvl.strip()]
             except Exception: safe_config['alert_severity_levels'] = []
         else: safe_config['alert_severity_levels'] = []
-        safe_config['monitored_namespaces'] = []
+
+        ns_json_string = safe_config.get('monitored_namespaces')
+        if ns_json_string:
+             try:
+                 safe_config['monitored_namespaces'] = json.loads(ns_json_string)
+                 if not isinstance(safe_config['monitored_namespaces'], list):
+                      safe_config['monitored_namespaces'] = []
+             except json.JSONDecodeError:
+                 logger.warning(f"Could not decode global monitored_namespaces JSON: {ns_json_string}")
+                 safe_config['monitored_namespaces'] = []
+        else:
+             safe_config['monitored_namespaces'] = []
+
         logger.info("Returning non-sensitive GLOBAL configuration.")
         return jsonify(safe_config), 200
     except Exception as e:
         logger.error(f"Error getting all global config: {e}", exc_info=True)
         return jsonify({"error": "Failed to retrieve global configuration"}), 500
-
 
 @app.route('/api/namespaces', methods=['GET'])
 def get_available_namespaces_api():
@@ -442,7 +432,6 @@ def get_available_namespaces_api():
         if conn:
             conn.close()
 
-
 @app.route('/api/config/ai', methods=['POST'])
 def save_global_ai_config_api():
     logger.info("--- POST /api/config/ai (Global) endpoint hit ---")
@@ -478,37 +467,44 @@ def save_global_telegram_config_api():
     if success: obsengine_config._last_config_refresh_time = 0; return jsonify({"message": message}), 200
     else: return jsonify({"error": message}), 500
 
-
 @app.route('/api/agents/<agent_id>/config', methods=['GET'])
 def get_agent_config_api(agent_id):
     logger.info(f"--- GET /api/agents/{agent_id}/config endpoint hit ---")
     if not agent_id: return jsonify({"error": "Agent ID is required"}), 400
     try:
-        agent_config = db_manager.load_agent_config(DB_PATH, agent_id)
-        global_config = db_manager.load_all_global_config(DB_PATH)
-        merged_config = {
-            'scan_interval_seconds': int(global_config.get('scan_interval_seconds', getattr(obsengine_config, 'DEFAULT_SCAN_INTERVAL_SECONDS', 30))),
-            'restart_count_threshold': int(global_config.get('restart_count_threshold', getattr(obsengine_config, 'DEFAULT_RESTART_COUNT_THRESHOLD', 5))),
-            'loki_scan_min_level': global_config.get('loki_scan_min_level', getattr(obsengine_config, 'DEFAULT_LOKI_SCAN_MIN_LEVEL', 'INFO')).upper(),
-            'monitored_namespaces': [],
-        }
-        if 'scan_interval_seconds' in agent_config:
-            try: merged_config['scan_interval_seconds'] = int(agent_config['scan_interval_seconds'])
+        global_defaults = obsengine_config.get_agent_defaults()
+        agent_overrides = db_manager.load_agent_config(DB_PATH, agent_id)
+        merged_config = global_defaults.copy()
+
+        if 'scan_interval_seconds' in agent_overrides:
+            try:
+                val = int(agent_overrides['scan_interval_seconds'])
+                if val >= 10: merged_config['scan_interval_seconds'] = val
             except (ValueError, TypeError): pass
-        if 'restart_count_threshold' in agent_config:
-            try: merged_config['restart_count_threshold'] = int(agent_config['restart_count_threshold'])
+        if 'restart_count_threshold' in agent_overrides:
+            try:
+                val = int(agent_overrides['restart_count_threshold'])
+                if val >= 1: merged_config['restart_count_threshold'] = val
             except (ValueError, TypeError): pass
-        if 'loki_scan_min_level' in agent_config:
-             merged_config['loki_scan_min_level'] = agent_config['loki_scan_min_level'].upper()
-        ns_json_string = agent_config.get('monitored_namespaces')
+        if 'loki_scan_min_level' in agent_overrides:
+             level = agent_overrides['loki_scan_min_level'].upper()
+             valid_levels = ["DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"]
+             if level in valid_levels: merged_config['loki_scan_min_level'] = level
+
+        ns_json_string = agent_overrides.get('monitored_namespaces')
         if ns_json_string:
             try:
-                merged_config['monitored_namespaces'] = json.loads(ns_json_string)
-                if not isinstance(merged_config['monitored_namespaces'], list): merged_config['monitored_namespaces'] = []
-            except json.JSONDecodeError: logger.warning(f"Could not decode monitored_namespaces JSON for agent {agent_id}: {ns_json_string}"); merged_config['monitored_namespaces'] = []
+                ns_list = json.loads(ns_json_string)
+                if isinstance(ns_list, list) and ns_list:
+                     merged_config['monitored_namespaces'] = [str(ns).strip() for ns in ns_list if isinstance(ns, str) and str(ns).strip()]
+            except json.JSONDecodeError:
+                 logger.warning(f"Could not decode monitored_namespaces JSON for agent {agent_id}: {ns_json_string}. Using global default.")
+
         logger.info(f"Returning merged configuration for agent {agent_id}.")
         return jsonify(merged_config), 200
-    except Exception as e: logger.error(f"Error getting config for agent {agent_id}: {e}", exc_info=True); return jsonify({"error": f"Failed to retrieve configuration for agent {agent_id}"}), 500
+    except Exception as e:
+        logger.error(f"Error getting config for agent {agent_id}: {e}", exc_info=True)
+        return jsonify({"error": f"Failed to retrieve configuration for agent {agent_id}"}), 500
 
 @app.route('/api/agents/<agent_id>/config/general', methods=['POST'])
 def save_agent_general_config_api(agent_id):
@@ -552,10 +548,6 @@ def save_agent_namespaces_api(agent_id):
     if success: return jsonify({"message": message}), 200
     else: return jsonify({"error": message}), 500
 
-# --- REMOVED: /api/cluster/info endpoint ---
-# The cluster info is now part of the /api/agents/status response
-
-# Main execution block
 if __name__ == '__main__':
     flask_port = int(os.environ.get("FLASK_PORT", 8080))
     debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"

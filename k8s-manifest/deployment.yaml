@@ -1,3 +1,4 @@
+# ai-agent1/k8s-manifest/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,7 +16,7 @@ spec:
     spec:
       containers:
         - name: agent
-          image: codebuild.alfinac.com:4444/library/ai-agent1:v1.0.7
+          image: codebuild.alfinac.com:4444/library/ai-agent1:v1.0.8 # Cập nhật image nếu cần
           envFrom:
             - configMapRef:
                 name: k8s-log-agent-config
@@ -24,6 +25,14 @@ spec:
               value: Asia/Ho_Chi_Minh
             - name: K8S_CLUSTER_NAME
               value: "alfinac-k8s-cluster-1"
+            - name: AGENT_ID
+              value: "alfinac-k8s-cluster-1" # Hoặc một ID duy nhất khác
+            - name: OBS_ENGINE_URL # Cần thiết để Agent gọi về lấy config động
+              value: "http://obs-engine-service.kube-observability.svc.cluster.local:8080"
+            - name: PYTHONUNBUFFERED # Đảm bảo log Python xuất hiện ngay lập tức
+              value: "1"
+            - name: LOG_LEVEL # Có thể ghi đè log level ở đây nếu muốn
+              value: "INFO"
           resources:
             limits:
               cpu: 500m
@@ -34,14 +43,21 @@ spec:
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           imagePullPolicy: Always
+          volumeMounts:
+            - name: agent-cache
+              mountPath: /cache
       restartPolicy: Always
       terminationGracePeriodSeconds: 30
       dnsPolicy: ClusterFirst
-      serviceAccountName: k8s-log-agent-sa
+      serviceAccountName: k8s-log-agent-sa # Phải khớp với tên SA trong rbac.yaml
       securityContext:
         runAsUser: 1001
         runAsNonRoot: true
+        fsGroup: 1001 # Đảm bảo agent có quyền ghi vào /cache
       schedulerName: default-scheduler
+      volumes:
+        - name: agent-cache
+          emptyDir: {} # Dùng emptyDir cho cache đơn giản
   strategy:
     type: RollingUpdate
     rollingUpdate:

@@ -1,30 +1,59 @@
+# ai-agent1/k8s-manifest/rbac.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: obs-engine-sa
-  namespace: kube-observability
+  # Giữ nguyên tên Service Account hoặc đổi nếu muốn, nhưng phải khớp với deployment.yaml
+  name: k8s-log-agent-sa
+  namespace: kube-observability # Đảm bảo đúng namespace
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: obs-engine-cluster-reader
+  # Đổi tên Role để phản ánh quyền rộng hơn
+  name: k8s-log-agent-reader
 rules:
 - apiGroups: [""] # Core API group
-  resources: ["namespaces", "nodes", "events"]
-  verbs: ["get", "list"]
+  resources:
+  - pods
+  - pods/log # Cần thiết nếu muốn lấy log trực tiếp (hiện tại đang dùng Loki)
+  - nodes
+  - events
+  - namespaces
+  - resourcequotas     # Quyền đọc ResourceQuota
+  - limitranges        # Quyền đọc LimitRange
+  verbs: ["get", "list", "watch"] # Thêm "watch" nếu cần theo dõi thay đổi real-time (hiện tại chưa cần)
+- apiGroups: ["apps"] # Apps API group
+  resources:
+  - deployments        # Quyền đọc Deployments
+  - replicasets        # Quyền đọc ReplicaSets
+  - statefulsets       # Quyền đọc StatefulSets
+  - daemonsets         # Quyền đọc DaemonSets
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch"] # Batch API group
+  resources:
+  - jobs               # Quyền đọc Jobs
+  - cronjobs           # Quyền đọc CronJobs (có thể hữu ích)
+  verbs: ["get", "list", "watch"]
+# - apiGroups: ["metrics.k8s.io"] # Metrics API group (Tùy chọn, nếu muốn lấy metrics pod/node)
+#   resources: ["pods", "nodes"]
+#   verbs: ["get", "list"]
 - apiGroups: ["version"]
   resources: ["*"]
   verbs: ["get"]
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: obs-engine-read-cluster-info
+  # Đổi tên Binding cho phù hợp
+  name: k8s-log-agent-binding
 subjects:
 - kind: ServiceAccount
-  name: obs-engine-sa
-  namespace: kube-observability
+  name: k8s-log-agent-sa # Tên Service Account phải khớp
+  namespace: kube-observability # Namespace của Service Account
 roleRef:
   kind: ClusterRole
-  name: obs-engine-cluster-reader
+  name: k8s-log-agent-reader # Trỏ đến ClusterRole mới đã tạo ở trên
   apiGroup: rbac.authorization.k8s.io
+
