@@ -1,67 +1,83 @@
 # ai-agent1/app/k8s_monitor.py
 import logging
 from datetime import datetime, timedelta, timezone, MINYEAR
-from kubernetes import client, config
-from kubernetes.client.exceptions import ApiException
+# Sử dụng thư viện asyncio của kubernetes
+from kubernetes_asyncio import client, config
+from kubernetes_asyncio.client.exceptions import ApiException
 import os
 import sys
 import json
+import asyncio
 
+# Kubernetes API clients (initialized later)
 k8s_core_v1 = None
 k8s_apps_v1 = None
 k8s_batch_v1 = None
 k8s_version_api = None
 k8s_client_initialized = False
+_k8s_init_lock = asyncio.Lock()
 
-def initialize_k8s_client():
+# Chuyển thành hàm async
+async def initialize_k8s_client():
+    """Initializes Kubernetes API clients asynchronously."""
     global k8s_core_v1, k8s_apps_v1, k8s_batch_v1, k8s_version_api, k8s_client_initialized
-    if k8s_client_initialized:
-        return True
-    logging.info("[K8s Monitor] Attempting to initialize Kubernetes client...")
-    try:
-        config.load_incluster_config()
-        logging.info("[K8s Monitor] Loaded in-cluster Kubernetes config.")
-        api_client = client.ApiClient()
-        k8s_core_v1 = client.CoreV1Api(api_client)
-        k8s_apps_v1 = client.AppsV1Api(api_client)
-        k8s_batch_v1 = client.BatchV1Api(api_client)
-        k8s_version_api = client.VersionApi(api_client)
-        k8s_client_initialized = True
-        logging.info("[K8s Monitor] Kubernetes client initialized successfully (in-cluster).")
-        return True
-    except config.ConfigException as e1:
-        logging.warning(f"[K8s Monitor] In-cluster config failed ({e1}), trying kubeconfig...")
+    async with _k8s_init_lock:
+        if k8s_client_initialized:
+            logging.debug("[K8s Monitor] Async client already initialized.")
+            return True
+        logging.info("[K8s Monitor] Attempting to initialize Async Kubernetes client...")
         try:
-            config.load_kube_config()
-            logging.info("[K8s Monitor] Loaded local Kubernetes config (kubeconfig).")
+            # --- SỬA LỖI: Bỏ await ở đây ---
+            config.load_incluster_config()
+            # ---------------------------
+            logging.info("[K8s Monitor] Loaded in-cluster Kubernetes config (sync).")
             api_client = client.ApiClient()
             k8s_core_v1 = client.CoreV1Api(api_client)
             k8s_apps_v1 = client.AppsV1Api(api_client)
             k8s_batch_v1 = client.BatchV1Api(api_client)
             k8s_version_api = client.VersionApi(api_client)
             k8s_client_initialized = True
-            logging.info("[K8s Monitor] Kubernetes client initialized successfully (kubeconfig).")
+            logging.info("[K8s Monitor] Async Kubernetes client initialized successfully (in-cluster).")
             return True
-        except config.ConfigException as e2:
-            logging.error(f"[K8s Monitor] Could not configure Kubernetes client (in-cluster failed: {e1}, kubeconfig failed: {e2}). K8s monitoring features will be unavailable.")
+        except config.ConfigException as e1:
+            logging.warning(f"[K8s Monitor] In-cluster config failed ({e1}), trying kubeconfig (async)...")
+            try:
+                # --- SỬA LỖI: Bỏ await ở đây ---
+                config.load_kube_config()
+                # ---------------------------
+                logging.info("[K8s Monitor] Loaded local Kubernetes config (kubeconfig - sync).")
+                api_client = client.ApiClient()
+                k8s_core_v1 = client.CoreV1Api(api_client)
+                k8s_apps_v1 = client.AppsV1Api(api_client)
+                k8s_batch_v1 = client.BatchV1Api(api_client)
+                k8s_version_api = client.VersionApi(api_client)
+                k8s_client_initialized = True
+                logging.info("[K8s Monitor] Async Kubernetes client initialized successfully (kubeconfig).")
+                return True
+            except config.ConfigException as e2:
+                logging.error(f"[K8s Monitor] Could not configure Kubernetes client (in-cluster failed: {e1}, kubeconfig failed: {e2}). K8s monitoring features will be unavailable.")
+                return False
+            except Exception as e_kube:
+                logging.error(f"[K8s Monitor] Unexpected error loading kubeconfig (async): {e_kube}", exc_info=True)
+                return False
+        except Exception as e_global:
+            # Bắt lỗi cụ thể hơn nếu có thể, ví dụ lỗi permission khi đọc token
+            logging.error(f"[K8s Monitor] Unexpected error during K8s client initialization (async): {e_global}", exc_info=True)
             return False
-        except Exception as e_kube:
-            logging.error(f"[K8s Monitor] Unexpected error loading kubeconfig: {e_kube}", exc_info=True)
-            return False
-    except Exception as e_global:
-        logging.error(f"[K8s Monitor] Unexpected error loading in-cluster config: {e_global}", exc_info=True)
-        return False
 
-def get_cluster_summary():
+# --- Các hàm async khác giữ nguyên ---
+async def get_cluster_summary():
+    """Retrieves basic cluster information asynchronously."""
     if not k8s_client_initialized:
-        logging.warning("[K8s Monitor] K8s client not initialized. Cannot get cluster summary.")
-        return {"k8s_version": "N/A", "node_count": 0}
+        if not await initialize_k8s_client():
+            logging.warning("[K8s Monitor] K8s client not initialized. Cannot get cluster summary.")
+            return {"k8s_version": "N/A", "node_count": 0}
 
     summary = {"k8s_version": "N/A", "node_count": 0}
-
+    # ... (phần còn lại của hàm giữ nguyên) ...
     try:
         if k8s_version_api:
-            version_info = k8s_version_api.get_code()
+            version_info = await k8s_version_api.get_code()
             summary["k8s_version"] = version_info.git_version or "N/A"
         else:
             logging.warning("[K8s Monitor] Version API client not available for cluster summary.")
@@ -72,7 +88,7 @@ def get_cluster_summary():
 
     try:
         if k8s_core_v1:
-            nodes = k8s_core_v1.list_node(watch=False, timeout_seconds=30)
+            nodes = await k8s_core_v1.list_node(watch=False, _request_timeout=30)
             summary["node_count"] = len(nodes.items) if nodes and nodes.items else 0
         else:
              logging.warning("[K8s Monitor] Core V1 API client not available for node count.")
@@ -84,12 +100,16 @@ def get_cluster_summary():
     logging.debug(f"[K8s Monitor] Cluster summary retrieved: {summary}")
     return summary
 
-def get_pod_info(namespace, pod_name):
+
+async def get_pod_info(namespace, pod_name):
+    """Lấy thông tin chi tiết của Pod asynchronously."""
     if not k8s_client_initialized or not k8s_core_v1:
-        logging.warning("[K8s Monitor] K8s client not initialized. Cannot get pod info.")
-        return None
+        if not await initialize_k8s_client():
+            logging.warning("[K8s Monitor] K8s client not initialized. Cannot get pod info.")
+            return None
     try:
-        pod = k8s_core_v1.read_namespaced_pod(name=pod_name, namespace=namespace)
+        pod = await k8s_core_v1.read_namespaced_pod(name=pod_name, namespace=namespace, _request_timeout=15)
+        # ... (phần còn lại của hàm giữ nguyên) ...
         info = {
             "name": pod.metadata.name,
             "namespace": pod.metadata.namespace,
@@ -121,30 +141,23 @@ def get_pod_info(namespace, pod_name):
                     elif cs.state.terminated:
                         state_info = f"Terminated ({cs.state.terminated.reason or 'N/A'}, ExitCode: {cs.state.terminated.exit_code})"
                         terminated_info = {
-                             'reason': cs.state.terminated.reason,
-                             'exit_code': cs.state.terminated.exit_code,
+                             'reason': cs.state.terminated.reason, 'exit_code': cs.state.terminated.exit_code,
                              'started_at': cs.state.terminated.started_at.isoformat() if cs.state.terminated.started_at else None,
                              'finished_at': cs.state.terminated.finished_at.isoformat() if cs.state.terminated.finished_at else None,
                         }
-
                 if cs.last_state:
                     if cs.last_state.running: last_state_info = "Last: Running"
                     elif cs.last_state.waiting: last_state_info = f"Last: Waiting ({cs.last_state.waiting.reason or 'N/A'})"
                     elif cs.last_state.terminated:
                          last_state_info = f"Last: Terminated ({cs.last_state.terminated.reason or 'N/A'}, ExitCode: {cs.last_state.terminated.exit_code})"
                          last_terminated_info = {
-                             'reason': cs.last_state.terminated.reason,
-                             'exit_code': cs.last_state.terminated.exit_code,
+                             'reason': cs.last_state.terminated.reason, 'exit_code': cs.last_state.terminated.exit_code,
                              'started_at': cs.last_state.terminated.started_at.isoformat() if cs.last_state.terminated.started_at else None,
                              'finished_at': cs.last_state.terminated.finished_at.isoformat() if cs.last_state.terminated.finished_at else None,
                          }
-
                 info["container_statuses"][cs.name] = {
-                    "ready": cs.ready,
-                    "restart_count": cs.restart_count,
-                    "state": state_info,
-                    "terminated_details": terminated_info,
-                    "last_state": last_state_info,
+                    "ready": cs.ready, "restart_count": cs.restart_count, "state": state_info,
+                    "terminated_details": terminated_info, "last_state": last_state_info,
                     "last_terminated_details": last_terminated_info
                 }
         return info
@@ -156,19 +169,21 @@ def get_pod_info(namespace, pod_name):
         logging.error(f"[K8s Monitor] Unexpected error getting pod info for {namespace}/{pod_name}: {e}", exc_info=True)
         return None
 
-def get_node_info(node_name):
+async def get_node_info(node_name):
+    """Lấy thông tin Node asynchronously."""
+    # ... (giữ nguyên code) ...
     if not k8s_client_initialized or not k8s_core_v1:
-        logging.warning("[K8s Monitor] K8s client not initialized. Cannot get node info.")
-        return None
+        if not await initialize_k8s_client():
+            logging.warning("[K8s Monitor] K8s client not initialized. Cannot get node info.")
+            return None
     if not node_name:
         return None
     try:
-        node = k8s_core_v1.read_node(name=node_name)
+        node = await k8s_core_v1.read_node(name=node_name, _request_timeout=15)
         conditions = {cond.type: {"status": cond.status, "reason": cond.reason, "message": cond.message}
                       for cond in node.status.conditions} if node.status.conditions else {}
         info = {
-            "name": node.metadata.name,
-            "conditions": conditions,
+            "name": node.metadata.name, "conditions": conditions,
             "allocatable_cpu": node.status.allocatable.get('cpu', 'N/A'),
             "allocatable_memory": node.status.allocatable.get('memory', 'N/A'),
             "capacity_cpu": node.status.capacity.get('cpu', 'N/A'),
@@ -186,14 +201,18 @@ def get_node_info(node_name):
         logging.error(f"[K8s Monitor] Unexpected error getting node info for {node_name}: {e}", exc_info=True)
         return None
 
-def get_pod_events(namespace, pod_name, since_minutes=60, limit=50):
+
+async def get_pod_events(namespace, pod_name, since_minutes=60, limit=50):
+    """Lấy các event gần đây của Pod asynchronously."""
+    # ... (giữ nguyên code) ...
     if not k8s_client_initialized or not k8s_core_v1:
-        logging.warning("[K8s Monitor] K8s client not initialized. Cannot get pod events.")
-        return []
+        if not await initialize_k8s_client():
+            logging.warning("[K8s Monitor] K8s client not initialized. Cannot get pod events.")
+            return []
     try:
         since_time = datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
         field_selector = f"involvedObject.kind=Pod,involvedObject.name={pod_name}"
-        events = k8s_core_v1.list_namespaced_event(namespace=namespace, field_selector=field_selector, limit=limit * 2)
+        events = await k8s_core_v1.list_namespaced_event(namespace=namespace, field_selector=field_selector, limit=limit * 2, _request_timeout=20)
 
         recent_events = []
         if events and events.items:
@@ -211,11 +230,8 @@ def get_pod_events(namespace, pod_name, since_minutes=60, limit=50):
 
                     if event_time >= since_time:
                         recent_events.append({
-                            "time": event_time.isoformat(),
-                            "type": event.type,
-                            "reason": event.reason,
-                            "message": event.message,
-                            "count": event.count,
+                            "time": event_time.isoformat(), "type": event.type, "reason": event.reason,
+                            "message": event.message, "count": event.count,
                             "source_component": event.source.component if event.source else 'N/A',
                             "reporting_controller": event.reporting_component or 'N/A',
                         })
@@ -230,144 +246,126 @@ def get_pod_events(namespace, pod_name, since_minutes=60, limit=50):
         logging.error(f"[K8s Monitor] Unexpected error listing events for pod {namespace}/{pod_name}: {e}", exc_info=True)
         return []
 
-def get_controller_info(namespace, owner_references):
+
+async def get_controller_info(namespace, owner_references):
+    """Lấy thông tin của controller sở hữu Pod asynchronously."""
+    # ... (giữ nguyên code) ...
     if not k8s_client_initialized or not owner_references:
         return None
 
     controller_info = {}
-    for owner in owner_references:
+    tasks = []
+
+    async def fetch_single_controller(owner):
+        kind = owner.get('kind')
+        name = owner.get('name')
+        if not kind or not name: return None, None
+
+        controller_key = f"{kind}/{name}"
+        controller_data = {"kind": kind, "name": name, "status": "N/A", "details": {}}
+        details = {}
+
         try:
-            kind = owner.get('kind')
-            name = owner.get('name')
-            if not kind or not name: continue
-
-            controller_info[f"{kind}/{name}"] = {"kind": kind, "name": name, "status": "N/A", "details": {}}
-            details = {}
-
             if kind == 'ReplicaSet' and k8s_apps_v1:
-                rs = k8s_apps_v1.read_namespaced_replica_set(name=name, namespace=namespace)
-                details = {
-                    "replicas": rs.status.replicas or 0,
-                    "ready_replicas": rs.status.ready_replicas or 0,
-                    "available_replicas": rs.status.available_replicas or 0,
-                    "conditions": {c.type: c.status for c in rs.status.conditions} if rs.status.conditions else {}
-                }
+                rs = await k8s_apps_v1.read_namespaced_replica_set(name=name, namespace=namespace, _request_timeout=10)
+                details = {"replicas": rs.status.replicas or 0, "ready_replicas": rs.status.ready_replicas or 0, "available_replicas": rs.status.available_replicas or 0, "conditions": {c.type: c.status for c in rs.status.conditions} if rs.status.conditions else {}}
                 if rs.metadata.owner_references:
                     for rs_owner in rs.metadata.owner_references:
-                        if rs_owner.kind == 'Deployment':
-                             details['parent_deployment'] = rs_owner.name
+                        if rs_owner.kind == 'Deployment': details['parent_deployment'] = rs_owner.name
             elif kind == 'Deployment' and k8s_apps_v1:
-                dep = k8s_apps_v1.read_namespaced_deployment(name=name, namespace=namespace)
-                details = {
-                    "replicas": dep.status.replicas or 0,
-                    "ready_replicas": dep.status.ready_replicas or 0,
-                    "available_replicas": dep.status.available_replicas or 0,
-                    "updated_replicas": dep.status.updated_replicas or 0,
-                    "unavailable_replicas": dep.status.unavailable_replicas or 0,
-                    "conditions": {c.type: c.status for c in dep.status.conditions} if dep.status.conditions else {},
-                    "strategy": dep.spec.strategy.type if dep.spec.strategy else "N/A"
-                }
+                dep = await k8s_apps_v1.read_namespaced_deployment(name=name, namespace=namespace, _request_timeout=10)
+                details = {"replicas": dep.status.replicas or 0, "ready_replicas": dep.status.ready_replicas or 0, "available_replicas": dep.status.available_replicas or 0, "updated_replicas": dep.status.updated_replicas or 0, "unavailable_replicas": dep.status.unavailable_replicas or 0, "conditions": {c.type: c.status for c in dep.status.conditions} if dep.status.conditions else {}, "strategy": dep.spec.strategy.type if dep.spec.strategy else "N/A"}
             elif kind == 'StatefulSet' and k8s_apps_v1:
-                sts = k8s_apps_v1.read_namespaced_stateful_set(name=name, namespace=namespace)
-                details = {
-                    "replicas": sts.status.replicas or 0,
-                    "ready_replicas": sts.status.ready_replicas or 0,
-                    "current_replicas": sts.status.current_replicas or 0,
-                    "updated_replicas": sts.status.updated_replicas or 0,
-                     "conditions": {c.type: c.status for c in sts.status.conditions} if sts.status.conditions else {}
-                }
+                sts = await k8s_apps_v1.read_namespaced_stateful_set(name=name, namespace=namespace, _request_timeout=10)
+                details = {"replicas": sts.status.replicas or 0, "ready_replicas": sts.status.ready_replicas or 0, "current_replicas": sts.status.current_replicas or 0, "updated_replicas": sts.status.updated_replicas or 0, "conditions": {c.type: c.status for c in sts.status.conditions} if sts.status.conditions else {}}
             elif kind == 'DaemonSet' and k8s_apps_v1:
-                 ds = k8s_apps_v1.read_namespaced_daemon_set(name=name, namespace=namespace)
-                 details = {
-                     "desired_number_scheduled": ds.status.desired_number_scheduled or 0,
-                     "current_number_scheduled": ds.status.current_number_scheduled or 0,
-                     "number_ready": ds.status.number_ready or 0,
-                     "number_available": ds.status.number_available or 0,
-                     "updated_number_scheduled": ds.status.updated_number_scheduled or 0,
-                 }
+                 ds = await k8s_apps_v1.read_namespaced_daemon_set(name=name, namespace=namespace, _request_timeout=10)
+                 details = {"desired_number_scheduled": ds.status.desired_number_scheduled or 0, "current_number_scheduled": ds.status.current_number_scheduled or 0, "number_ready": ds.status.number_ready or 0, "number_available": ds.status.number_available or 0, "updated_number_scheduled": ds.status.updated_number_scheduled or 0}
             elif kind == 'Job' and k8s_batch_v1:
-                 job = k8s_batch_v1.read_namespaced_job(name=name, namespace=namespace)
-                 details = {
-                     "succeeded": job.status.succeeded or 0,
-                     "failed": job.status.failed or 0,
-                     "active": job.status.active or 0,
-                     "conditions": {c.type: c.status for c in job.status.conditions} if job.status.conditions else {}
-                 }
+                 job = await k8s_batch_v1.read_namespaced_job(name=name, namespace=namespace, _request_timeout=10)
+                 details = {"succeeded": job.status.succeeded or 0, "failed": job.status.failed or 0, "active": job.status.active or 0, "conditions": {c.type: c.status for c in job.status.conditions} if job.status.conditions else {}}
                  if job.metadata.owner_references:
                      for job_owner in job.metadata.owner_references:
-                         if job_owner.kind == 'CronJob':
-                             details['parent_cronjob'] = job_owner.name
+                         if job_owner.kind == 'CronJob': details['parent_cronjob'] = job_owner.name
 
             if details:
                  conditions = details.get("conditions", {})
-                 if conditions.get("Available") == "False" or conditions.get("Progressing") == "False" or details.get("failed", 0) > 0:
-                     controller_info[f"{kind}/{name}"]["status"] = "Problem"
-                 elif conditions.get("Available") == "True" and conditions.get("Progressing") == "True":
-                     controller_info[f"{kind}/{name}"]["status"] = "Healthy"
-                 elif details.get("succeeded", 0) > 0 and details.get("active", 0) == 0 and details.get("failed", 0) == 0:
-                     controller_info[f"{kind}/{name}"]["status"] = "Completed"
-
-            controller_info[f"{kind}/{name}"]["details"] = details
+                 if conditions.get("Available") == "False" or conditions.get("Progressing") == "False" or details.get("failed", 0) > 0: controller_data["status"] = "Problem"
+                 elif conditions.get("Available") == "True" and conditions.get("Progressing") == "True": controller_data["status"] = "Healthy"
+                 elif details.get("succeeded", 0) > 0 and details.get("active", 0) == 0 and details.get("failed", 0) == 0: controller_data["status"] = "Completed"
+            controller_data["details"] = details
+            return controller_key, controller_data
 
         except ApiException as e:
-            if e.status != 404:
-                logging.warning(f"[K8s Monitor] API error getting controller {kind}/{name}: {e.status} {e.reason}")
-            controller_info[f"{kind}/{name}"]["status"] = "ErrorFetching"
-            controller_info[f"{kind}/{name}"]["error"] = f"{e.status} {e.reason}"
+            if e.status != 404: logging.warning(f"[K8s Monitor] API error getting controller {kind}/{name}: {e.status} {e.reason}")
+            controller_data["status"] = "ErrorFetching"; controller_data["error"] = f"{e.status} {e.reason}"
+            return controller_key, controller_data
         except Exception as e:
             logging.error(f"[K8s Monitor] Unexpected error getting controller {kind}/{name}: {e}", exc_info=True)
-            controller_info[f"{kind}/{name}"]["status"] = "ErrorFetching"
-            controller_info[f"{kind}/{name}"]["error"] = str(e)
+            controller_data["status"] = "ErrorFetching"; controller_data["error"] = str(e)
+            return controller_key, controller_data
+
+    for owner in owner_references:
+        tasks.append(fetch_single_controller(owner))
+
+    results = await asyncio.gather(*tasks)
+    for key, data in results:
+        if key and data:
+            controller_info[key] = data
 
     return controller_info if controller_info else None
 
-def get_namespace_resource_info(namespace):
+
+async def get_namespace_resource_info(namespace):
+    """Lấy thông tin ResourceQuota và LimitRange của namespace asynchronously."""
+    # ... (giữ nguyên code) ...
     if not k8s_client_initialized or not k8s_core_v1:
-        return {}
+        if not await initialize_k8s_client():
+            logging.warning("[K8s Monitor] K8s client not initialized. Cannot get NS resource info.")
+            return {}
 
     resource_info = {"quotas": [], "limits": []}
-    try:
-        quotas = k8s_core_v1.list_namespaced_resource_quota(namespace=namespace, timeout_seconds=10)
-        if quotas and quotas.items:
-             for quota in quotas.items:
-                 resource_info["quotas"].append({
-                     "name": quota.metadata.name,
-                     "hard": quota.spec.hard if quota.spec and quota.spec.hard else {},
-                     "used": quota.status.used if quota.status and quota.status.used else {}
-                 })
-    except ApiException as e:
-         if e.status != 403:
-             logging.warning(f"[K8s Monitor] API error listing ResourceQuotas in {namespace}: {e.status} {e.reason}")
-    except Exception as e:
-         logging.error(f"[K8s Monitor] Unexpected error listing ResourceQuotas in {namespace}: {e}", exc_info=True)
+    quota_task = None
+    limit_task = None
 
     try:
-        limits = k8s_core_v1.list_namespaced_limit_range(namespace=namespace, timeout_seconds=10)
-        if limits and limits.items:
-             for limit in limits.items:
-                 limit_details = []
-                 if limit.spec and limit.spec.limits:
-                     for item in limit.spec.limits:
-                         limit_details.append({
-                             "type": item.type,
-                             "max": item.max,
-                             "min": item.min,
-                             "default": item.default,
-                             "defaultRequest": item.default_request
-                         })
-                 resource_info["limits"].append({
-                     "name": limit.metadata.name,
-                     "limit_details": limit_details
-                 })
-    except ApiException as e:
-         if e.status != 403:
-             logging.warning(f"[K8s Monitor] API error listing LimitRanges in {namespace}: {e.status} {e.reason}")
+        quota_task = asyncio.create_task(k8s_core_v1.list_namespaced_resource_quota(namespace=namespace, _request_timeout=10))
     except Exception as e:
-         logging.error(f"[K8s Monitor] Unexpected error listing LimitRanges in {namespace}: {e}", exc_info=True)
+         logging.error(f"[K8s Monitor] Error creating task for ResourceQuotas in {namespace}: {e}", exc_info=True)
+
+    try:
+        limit_task = asyncio.create_task(k8s_core_v1.list_namespaced_limit_range(namespace=namespace, _request_timeout=10))
+    except Exception as e:
+         logging.error(f"[K8s Monitor] Error creating task for LimitRanges in {namespace}: {e}", exc_info=True)
+
+    quota_results, limit_results = await asyncio.gather(quota_task, limit_task, return_exceptions=True)
+
+    if isinstance(quota_results, ApiException):
+         if quota_results.status != 403: logging.warning(f"[K8s Monitor] API error listing ResourceQuotas in {namespace}: {quota_results.status} {quota_results.reason}")
+    elif isinstance(quota_results, Exception):
+         logging.error(f"[K8s Monitor] Unexpected error listing ResourceQuotas in {namespace}: {quota_results}", exc_info=True)
+    elif quota_results and quota_results.items:
+         for quota in quota_results.items:
+             resource_info["quotas"].append({"name": quota.metadata.name, "hard": quota.spec.hard if quota.spec and quota.spec.hard else {}, "used": quota.status.used if quota.status and quota.status.used else {}})
+
+    if isinstance(limit_results, ApiException):
+         if limit_results.status != 403: logging.warning(f"[K8s Monitor] API error listing LimitRanges in {namespace}: {limit_results.status} {limit_results.reason}")
+    elif isinstance(limit_results, Exception):
+         logging.error(f"[K8s Monitor] Unexpected error listing LimitRanges in {namespace}: {limit_results}", exc_info=True)
+    elif limit_results and limit_results.items:
+         for limit in limit_results.items:
+             limit_details = []
+             if limit.spec and limit.spec.limits:
+                 for item in limit.spec.limits:
+                     limit_details.append({"type": item.type, "max": item.max, "min": item.min, "default": item.default, "defaultRequest": item.default_request})
+             resource_info["limits"].append({"name": limit.metadata.name, "limit_details": limit_details})
 
     return resource_info if resource_info["quotas"] or resource_info["limits"] else None
 
-def format_k8s_context(pod_info, node_info, pod_events):
+
+async def format_k8s_context(pod_info, node_info, pod_events):
+    """Định dạng ngữ cảnh K8s chi tiết hơn asynchronously."""
+    # ... (giữ nguyên code) ...
     context_lines = ["--- Kubernetes Context ---"]
     if not k8s_client_initialized:
         context_lines.append("K8s Client not initialized.")
@@ -376,6 +374,7 @@ def format_k8s_context(pod_info, node_info, pod_events):
     namespace = pod_info.get('namespace', 'N/A') if pod_info else 'N/A'
 
     if pod_info:
+        # ... (phần thông tin pod giữ nguyên) ...
         context_lines.append(f"Pod: {namespace}/{pod_info.get('name', 'N/A')}")
         context_lines.append(f"  Status: {pod_info.get('status', 'N/A')} (Reason: {pod_info.get('reason', 'N/A')}, Message: {pod_info.get('message', 'N/A')})")
         context_lines.append(f"  Node: {pod_info.get('node_name', 'N/A')}")
@@ -395,13 +394,10 @@ def format_k8s_context(pod_info, node_info, pod_events):
                     context_lines.append(line)
 
         if pod_info.get('conditions'):
-                all_conditions = [
-                    f"{ctype}({cinfo.get('status','N/A')}-{cinfo.get('reason','N/A')})"
-                    for ctype, cinfo in pod_info['conditions'].items()
-                ]
+                all_conditions = [f"{ctype}({cinfo.get('status','N/A')}-{cinfo.get('reason','N/A')})" for ctype, cinfo in pod_info['conditions'].items()]
                 context_lines.append(f"  Pod Conditions: {', '.join(all_conditions)}")
 
-        controller_info = get_controller_info(namespace, pod_info.get('owner_references', []))
+        controller_info = await get_controller_info(namespace, pod_info.get('owner_references', []))
         if controller_info:
              context_lines.append("  Owner Controllers:")
              for c_key, c_data in controller_info.items():
@@ -412,7 +408,7 @@ def format_k8s_context(pod_info, node_info, pod_events):
         context_lines.append("Pod Info: Not Available")
 
     if namespace != 'N/A':
-        ns_resource_info = get_namespace_resource_info(namespace)
+        ns_resource_info = await get_namespace_resource_info(namespace)
         if ns_resource_info:
             context_lines.append(f"  Namespace '{namespace}' Resources:")
             if ns_resource_info.get("quotas"):
@@ -428,19 +424,19 @@ def format_k8s_context(pod_info, node_info, pod_events):
                      context_lines.append(f"      - {l.get('name')}: {details}")
 
     if node_info:
+        # ... (phần thông tin node giữ nguyên) ...
         context_lines.append(f"Node Info ({node_info.get('name', 'N/A')}):")
         context_lines.append(f"  Kubelet: {node_info.get('kubelet_version', 'N/A')}")
         context_lines.append(f"  OS: {node_info.get('os_image', 'N/A')}")
         context_lines.append(f"  Kernel: {node_info.get('kernel_version', 'N/A')}")
         context_lines.append(f"  Allocatable: CPU={node_info.get('allocatable_cpu', 'N/A')}, Mem={node_info.get('allocatable_memory', 'N/A')}")
         if node_info.get('conditions'):
-                all_node_conditions = [
-                    f"{ctype}({cinfo.get('status','N/A')}-{cinfo.get('reason','N/A')})"
-                    for ctype, cinfo in node_info['conditions'].items()
-                ]
+                all_node_conditions = [f"{ctype}({cinfo.get('status','N/A')}-{cinfo.get('reason','N/A')})" for ctype, cinfo in node_info['conditions'].items()]
                 context_lines.append(f"  Node Conditions: {', '.join(all_node_conditions)}")
 
+
     if pod_events:
+        # ... (phần thông tin event giữ nguyên) ...
         context_lines.append(f"Recent Pod Events (max {len(pod_events)}):")
         for event in pod_events:
             message_preview = event.get('message', '')
@@ -448,97 +444,98 @@ def format_k8s_context(pod_info, node_info, pod_events):
                  message_preview = message_preview[:197] + '...'
             context_lines.append(f"  - [{event.get('time', 'N/A')}] {event.get('type', 'N/A')} Reason={event.get('reason', 'N/A')} Count={event.get('count',1)} From={event.get('source_component', 'N/A')}/{event.get('reporting_controller','N/A')}: {message_preview}")
 
+
     context_lines.append("--- End Context ---")
     return "\n".join(context_lines)
 
-def scan_kubernetes_for_issues(namespaces_to_scan, restart_threshold, loki_detail_log_range_minutes=30):
+
+async def scan_kubernetes_for_issues(namespaces_to_scan, restart_threshold, loki_detail_log_range_minutes=30):
+    """Scans Kubernetes namespaces for problematic pods asynchronously."""
+    # ... (giữ nguyên code) ...
     if not k8s_client_initialized or not k8s_core_v1:
-        logging.warning("[K8s Monitor] K8s client not initialized. Skipping K8s scan.")
-        return {}
+        if not await initialize_k8s_client():
+            logging.warning("[K8s Monitor] K8s client not initialized. Skipping K8s scan.")
+            return {}
 
     problematic_pods = {}
-    logging.info(f"[K8s Monitor] Scanning {len(namespaces_to_scan)} Kubernetes namespaces for problematic pods...")
+    logging.info(f"[K8s Monitor] Scanning {len(namespaces_to_scan)} Kubernetes namespaces for problematic pods (async)...")
     recent_termination_threshold = datetime.now(timezone.utc) - timedelta(minutes=loki_detail_log_range_minutes)
 
+    tasks = []
     for ns in namespaces_to_scan:
-        try:
-            pods = k8s_core_v1.list_namespaced_pod(namespace=ns, watch=False, timeout_seconds=60)
-            for pod in pods.items:
-                pod_key = f"{ns}/{pod.metadata.name}"
-                issue_found = False
-                reason = ""
+        tasks.append(asyncio.create_task(scan_single_namespace(ns, restart_threshold, recent_termination_threshold)))
 
-                if pod.status.phase in ["Failed", "Unknown"]:
-                    issue_found = True
-                    reason = f"Pod phase is {pod.status.phase}"
-                elif pod.status.phase == "Pending" and pod.status.conditions:
-                        scheduled_condition = next((c for c in pod.status.conditions if c.type == "PodScheduled"), None)
-                        if scheduled_condition and scheduled_condition.status == "False" and scheduled_condition.reason == "Unschedulable":
-                            issue_found = True
-                            reason = f"Pod is Unschedulable ({scheduled_condition.message or 'No details'})"
+    results = await asyncio.gather(*tasks)
 
-                if not issue_found and pod.status.container_statuses:
-                    for cs in pod.status.container_statuses:
-                        if cs.restart_count >= restart_threshold:
-                            issue_found = True
-                            reason = f"Container '{cs.name}' restarted {cs.restart_count} times (>= threshold {restart_threshold})"
-                            break
-                        if cs.state and cs.state.waiting and cs.state.waiting.reason in [
-                            "CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull",
-                            "CreateContainerConfigError", "CreateContainerError", "InvalidImageName"
-                        ]:
-                            issue_found = True
-                            reason = f"Container '{cs.name}' in Waiting state ({cs.state.waiting.reason})"
-                            break
-                        if cs.state and cs.state.terminated and cs.state.terminated.reason in [
-                            "OOMKilled", "Error", "ContainerCannotRun", "DeadlineExceeded"
-                        ]:
-                            is_recent_termination = False
-                            finished_at = cs.state.terminated.finished_at
-                            if finished_at and finished_at.tzinfo is None:
-                                 finished_at = finished_at.replace(tzinfo=timezone.utc)
+    for ns_result in results:
+        problematic_pods.update(ns_result)
 
-                            if finished_at and finished_at >= recent_termination_threshold:
-                                 is_recent_termination = True
-
-                            if is_recent_termination or pod.spec.restart_policy != "Always":
-                                issue_found = True
-                                reason = f"Container '{cs.name}' Terminated (Reason: {cs.state.terminated.reason}, ExitCode: {cs.state.terminated.exit_code}, Recent: {is_recent_termination})"
-                                break
-
-                if issue_found:
-                    logging.warning(f"[K8s Monitor] Found potentially problematic pod: {pod_key}. Reason: {reason}")
-                    if pod_key not in problematic_pods:
-                        problematic_pods[pod_key] = {
-                            "namespace": ns,
-                            "pod_name": pod.metadata.name,
-                            "reason": f"K8s: {reason}"
-                        }
-                    elif "Terminated" in reason or "CrashLoopBackOff" in reason:
-                         problematic_pods[pod_key]["reason"] = f"K8s: {reason}"
-
-        except ApiException as e:
-            logging.error(f"[K8s Monitor] API Error scanning namespace {ns}: {e.status} {e.reason}")
-        except Exception as e:
-            logging.error(f"[K8s Monitor] Unexpected error scanning namespace {ns}: {e}", exc_info=True)
-
-    logging.info(f"[K8s Monitor] Finished K8s scan. Found {len(problematic_pods)} potentially problematic pods.")
+    logging.info(f"[K8s Monitor] Finished K8s scan (async). Found {len(problematic_pods)} potentially problematic pods.")
     return problematic_pods
 
-def get_active_namespaces(excluded_namespaces):
+
+async def scan_single_namespace(ns, restart_threshold, recent_termination_threshold):
+    """Scans a single namespace for problematic pods asynchronously."""
+    # ... (giữ nguyên code) ...
+    ns_problems = {}
+    try:
+        pods = await k8s_core_v1.list_namespaced_pod(namespace=ns, watch=False, _request_timeout=60)
+        for pod in pods.items:
+            pod_key = f"{ns}/{pod.metadata.name}"
+            issue_found = False
+            reason = ""
+
+            if pod.status.phase in ["Failed", "Unknown"]:
+                issue_found = True; reason = f"Pod phase is {pod.status.phase}"
+            elif pod.status.phase == "Pending" and pod.status.conditions:
+                scheduled_condition = next((c for c in pod.status.conditions if c.type == "PodScheduled"), None)
+                if scheduled_condition and scheduled_condition.status == "False" and scheduled_condition.reason == "Unschedulable":
+                    issue_found = True; reason = f"Pod is Unschedulable ({scheduled_condition.message or 'No details'})"
+
+            if not issue_found and pod.status.container_statuses:
+                for cs in pod.status.container_statuses:
+                    if cs.restart_count >= restart_threshold:
+                        issue_found = True; reason = f"Container '{cs.name}' restarted {cs.restart_count} times (>= threshold {restart_threshold})"; break
+                    if cs.state and cs.state.waiting and cs.state.waiting.reason in ["CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull", "CreateContainerConfigError", "CreateContainerError", "InvalidImageName"]:
+                        issue_found = True; reason = f"Container '{cs.name}' in Waiting state ({cs.state.waiting.reason})"; break
+                    if cs.state and cs.state.terminated and cs.state.terminated.reason in ["OOMKilled", "Error", "ContainerCannotRun", "DeadlineExceeded"]:
+                        is_recent = False
+                        finished_at = cs.state.terminated.finished_at
+                        if finished_at and finished_at.tzinfo is None: finished_at = finished_at.replace(tzinfo=timezone.utc)
+                        if finished_at and finished_at >= recent_termination_threshold: is_recent = True
+                        if is_recent or pod.spec.restart_policy != "Always":
+                            issue_found = True; reason = f"Container '{cs.name}' Terminated (Reason: {cs.state.terminated.reason}, ExitCode: {cs.state.terminated.exit_code}, Recent: {is_recent})"; break
+
+            if issue_found:
+                logging.warning(f"[K8s Monitor] Found potentially problematic pod: {pod_key}. Reason: {reason}")
+                if pod_key not in ns_problems:
+                    ns_problems[pod_key] = {"namespace": ns, "pod_name": pod.metadata.name, "reason": f"K8s: {reason}"}
+                elif "Terminated" in reason or "CrashLoopBackOff" in reason:
+                     ns_problems[pod_key]["reason"] = f"K8s: {reason}"
+    except ApiException as e:
+        logging.error(f"[K8s Monitor] API Error scanning namespace {ns} (async): {e.status} {e.reason}")
+    except Exception as e:
+        logging.error(f"[K8s Monitor] Unexpected error scanning namespace {ns} (async): {e}", exc_info=True)
+    return ns_problems
+
+
+async def get_active_namespaces(excluded_namespaces):
+    """Lấy danh sách namespace đang hoạt động asynchronously."""
+    # ... (giữ nguyên code) ...
     if not k8s_client_initialized or not k8s_core_v1:
-        logging.warning("[K8s Monitor] K8s client not initialized. Cannot get active namespaces.")
-        return []
+        if not await initialize_k8s_client():
+            logging.warning("[K8s Monitor] K8s client not initialized. Cannot get active namespaces.")
+            return []
     active_namespaces = []
     try:
-        all_namespaces = k8s_core_v1.list_namespace(watch=False, timeout_seconds=60)
+        all_namespaces = await k8s_core_v1.list_namespace(watch=False, _request_timeout=60)
         for ns in all_namespaces.items:
             if ns.status.phase == "Active" and ns.metadata.name not in excluded_namespaces:
                 active_namespaces.append(ns.metadata.name)
-        logging.info(f"[K8s Monitor] Found {len(active_namespaces)} active and non-excluded namespaces in cluster.")
+        logging.info(f"[K8s Monitor] Found {len(active_namespaces)} active and non-excluded namespaces in cluster (async).")
     except ApiException as e:
-        logging.error(f"[K8s Monitor] API Error listing namespaces: {e.status} {e.reason}. Check RBAC permissions.")
+        logging.error(f"[K8s Monitor] API Error listing namespaces (async): {e.status} {e.reason}. Check RBAC permissions.")
     except Exception as e:
-        logging.error(f"[K8s Monitor] Unexpected error listing namespaces: {e}", exc_info=True)
+        logging.error(f"[K8s Monitor] Unexpected error listing namespaces (async): {e}", exc_info=True)
     return active_namespaces
 
