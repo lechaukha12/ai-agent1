@@ -26,13 +26,16 @@ except ImportError as e:
 
 load_dotenv()
 
-AGENT_VERSION = "v1.0.7"
+AGENT_VERSION = "v1.0.8" # Cập nhật phiên bản nếu cần
+# --- THÊM LOẠI MÔI TRƯỜNG CHO AGENT NÀY ---
+ENVIRONMENT_TYPE = "kubernetes"
+# ------------------------------------------
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper(),
                     format='%(asctime)s - %(levelname)s - %(name)s:%(lineno)d - %(message)s',
                     stream=sys.stdout)
 
-logging.info(f"Logging configured successfully for Collector Agent - Version: {AGENT_VERSION}")
+logging.info(f"Logging configured successfully for Collector Agent - Type: {ENVIRONMENT_TYPE} - Version: {AGENT_VERSION}")
 
 CACHE_DIR = pathlib.Path("/cache")
 
@@ -55,7 +58,9 @@ async def get_cached_cluster_summary():
             current_cluster_summary = summary_data
             last_cluster_summary_refresh = now
             logging.info(f"Cluster summary refreshed: {current_cluster_summary}")
-        return current_cluster_summary
+        # --- Đổi tên key để phù hợp với environment_info ---
+        return {"kubernetes_info": current_cluster_summary} if current_cluster_summary else {}
+        # --------------------------------------------------
 
 # --- Chuyển thành hàm async ---
 async def identify_pods_to_investigate(session, monitored_namespaces, start_cycle_time, config):
@@ -94,11 +99,14 @@ async def identify_pods_to_investigate(session, monitored_namespaces, start_cycl
     logging.info("K8s and Loki scans finished.")
 
     # Xử lý kết quả (giống như trước)
+    # Key của dictionary này vẫn là "namespace/pod_name" để tiện xử lý nội bộ agent
     pods_to_investigate = {}
     if k8s_problem_pods: # Kiểm tra None hoặc lỗi
         for pod_key, data in k8s_problem_pods.items():
             if pod_key not in pods_to_investigate:
-                pods_to_investigate[pod_key] = {"reason": [], "logs": [], "k8s_issue_data": data}
+                # --- Thêm resource_type ---
+                pods_to_investigate[pod_key] = {"reason": [], "logs": [], "k8s_issue_data": data, "resource_type": "pod"}
+                # -------------------------
             reason_str = data.get("reason", "Unknown K8s Reason")
             if reason_str not in pods_to_investigate[pod_key]["reason"]:
                  pods_to_investigate[pod_key]["reason"].append(reason_str)
@@ -106,7 +114,10 @@ async def identify_pods_to_investigate(session, monitored_namespaces, start_cycl
     if loki_suspicious_logs: # Kiểm tra None hoặc lỗi
         for pod_key, logs in loki_suspicious_logs.items():
                 if pod_key not in pods_to_investigate:
-                    pods_to_investigate[pod_key] = {"reason": [], "logs": [], "k8s_issue_data": None}
+                    # --- Thêm resource_type ---
+                    # Giả định log từ Loki cũng liên quan đến pod trong K8s context này
+                    pods_to_investigate[pod_key] = {"reason": [], "logs": [], "k8s_issue_data": None, "resource_type": "pod"}
+                    # -------------------------
                 reason_text = f"Loki: Found {len(logs)} suspicious logs (level >= {loki_scan_min_level})"
                 if reason_text not in pods_to_investigate[pod_key]["reason"]:
                      pods_to_investigate[pod_key]["reason"].append(reason_text)
@@ -114,25 +125,27 @@ async def identify_pods_to_investigate(session, monitored_namespaces, start_cycl
                 if not pods_to_investigate[pod_key]["logs"]:
                     pods_to_investigate[pod_key]["logs"].extend(logs)
 
-    logging.info(f"Identified {len(pods_to_investigate)} pods for potential data collection this cycle.")
+    logging.info(f"Identified {len(pods_to_investigate)} resources for potential data collection this cycle.")
     return pods_to_investigate
 
 # --- Chuyển thành hàm async ---
-async def collect_pod_details(session, namespace, pod_name, initial_reasons, suspicious_logs_found_in_scan, config):
-    """Collects pod details asynchronously."""
-    logging.info(f"Collecting details for pod: {namespace}/{pod_name} (Initial Reasons: {initial_reasons})")
+async def collect_resource_details(session, namespace, resource_name_part, initial_reasons, suspicious_logs_found_in_scan, config):
+    """Collects resource details asynchronously (currently focused on K8s pods)."""
+    # Đổi tên hàm và tham số cho tổng quát hơn
+    logging.info(f"Collecting details for resource: {namespace}/{resource_name_part} (Initial Reasons: {initial_reasons})")
     loki_url = config.get('loki_url')
     loki_detail_minutes = config.get('loki_detail_log_range_minutes', 30)
     loki_limit = config.get('loki_query_limit', 500)
 
     if not loki_url:
-        logging.error(f"LOKI_URL not configured. Cannot fetch detailed logs for {namespace}/{pod_name}.")
-        return [], ""
+        logging.error(f"LOKI_URL not configured. Cannot fetch detailed logs for {namespace}/{resource_name_part}.")
+        return [], "" # Trả về logs rỗng và context rỗng
 
-    # Lấy thông tin K8s song song
+    # --- Logic lấy thông tin K8s giữ nguyên vì đây là K8s agent ---
+    # Chỉ đổi tên biến `pod_name` thành `resource_name_part`
+    pod_name = resource_name_part # Trong context K8s agent, resource_name_part chính là pod_name
     logging.debug(f"Fetching K8s details concurrently for {namespace}/{pod_name}...")
     pod_info_task = asyncio.create_task(k8s_monitor.get_pod_info(namespace, pod_name))
-    # Node info phụ thuộc pod_info, nên sẽ lấy sau
     events_task = asyncio.create_task(k8s_monitor.get_pod_events(namespace, pod_name, since_minutes=loki_detail_minutes + 10)) # Tăng time window events
 
     pod_info = await pod_info_task
@@ -143,8 +156,9 @@ async def collect_pod_details(session, namespace, pod_name, initial_reasons, sus
     pod_events = await events_task
     logging.debug(f"Finished fetching K8s details for {namespace}/{pod_name}.")
 
-    # Format context K8s (cần await vì nó gọi get_controller_info và get_namespace_resource_info async)
-    k8s_context_str = await k8s_monitor.format_k8s_context(pod_info, node_info, pod_events)
+    # --- Đổi tên biến k8s_context_str thành environment_context_str ---
+    environment_context_str = await k8s_monitor.format_k8s_context(pod_info, node_info, pod_events)
+    # ----------------------------------------------------------------
 
     # Xử lý logic lấy log (giống như trước, nhưng gọi hàm query_loki_for_pod async)
     logs_for_analysis = suspicious_logs_found_in_scan
@@ -187,7 +201,7 @@ async def collect_pod_details(session, namespace, pod_name, initial_reasons, sus
         logging.info(f"Querying Loki for detailed logs for {namespace}/{pod_name} (async)...")
         # Gọi hàm async từ loki_client
         detailed_logs = await loki_client.query_loki_for_pod(
-            session, loki_url, namespace, pod_name,
+            session, loki_url, namespace, pod_name, # Vẫn dùng namespace, pod_name cho Loki query
             log_start_time, log_end_time, loki_limit
         )
         logs_for_analysis = detailed_logs
@@ -221,7 +235,9 @@ async def collect_pod_details(session, namespace, pod_name, initial_reasons, sus
         if 'message' not in entry_copy or not isinstance(entry_copy['message'], str): entry_copy['message'] = str(entry_copy.get('message', ''))
         serializable_logs.append(entry_copy)
 
-    return serializable_logs, k8s_context_str
+    # --- Trả về logs và environment_context_str ---
+    return serializable_logs, environment_context_str
+    # -------------------------------------------
 
 # --- Cache logic (giữ nguyên, vẫn dùng I/O đồng bộ) ---
 def _ensure_cache_dir():
@@ -232,10 +248,13 @@ def _cache_failed_payload(payload):
     _ensure_cache_dir()
     try:
         timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
-        pod_key_safe = re.sub(r'[^\w\-.]', '_', payload.get("pod_key", "unknown_pod"))
-        filename = CACHE_DIR / f"failed_{timestamp_str}_{pod_key_safe}.json"
+        # --- Sử dụng resource_name và environment_name cho tên file cache ---
+        resource_name_safe = re.sub(r'[^\w\-.]', '_', payload.get("resource_name", "unknown_resource"))
+        env_name_safe = re.sub(r'[^\w\-.]', '_', payload.get("environment_name", "unknown_env"))
+        filename = CACHE_DIR / f"failed_{timestamp_str}_{env_name_safe}_{resource_name_safe}.json"
+        # -----------------------------------------------------------------
         with open(filename, 'w', encoding='utf-8') as f: json.dump(payload, f, ensure_ascii=False, indent=2)
-        logging.warning(f"Failed to send payload for {payload.get('pod_key')}. Cached to {filename}")
+        logging.warning(f"Failed to send payload for {payload.get('environment_name')}/{payload.get('resource_name')}. Cached to {filename}")
     except Exception as e: logging.error(f"Error caching failed payload: {e}", exc_info=True)
 
 # --- Chuyển thành hàm async ---
@@ -280,19 +299,30 @@ async def _process_single_cached_file(session, obs_engine_url, filepath):
          agent_id = payload.get("agent_id") or config_manager.get_agent_id() # Lấy agent_id
          payload['agent_id'] = agent_id
          payload['agent_version'] = AGENT_VERSION # Đảm bảo có version
+         # --- Đảm bảo có environment_type ---
+         payload['environment_type'] = payload.get('environment_type', ENVIRONMENT_TYPE) # Ưu tiên type đã lưu, nếu không có thì dùng type của agent hiện tại
+         # ---------------------------------
 
          if not agent_id:
               logging.error(f"Cannot resend cached payload {filepath.name}: Missing agent_id.")
               return False, filepath # Trả về False và filepath
 
-         # Gọi hàm send async (không cache lại)
+         # --- Gọi hàm send async với các trường mới ---
          success = await send_data_to_obs_engine_async(
              session, obs_engine_url,
-             payload.get("cluster_name"), agent_id, payload.get("pod_key"),
-             payload.get("initial_reasons"), payload.get("k8s_context"),
-             payload.get("logs"), payload.get("cluster_info"), payload.get("agent_version"),
+             payload.get("environment_name"), # Sử dụng environment_name
+             agent_id,
+             payload.get("environment_type"), # Thêm environment_type
+             payload.get("resource_type"),    # Thêm resource_type
+             payload.get("resource_name"),    # Sử dụng resource_name
+             payload.get("initial_reasons"),
+             payload.get("environment_context"), # Sử dụng environment_context
+             payload.get("logs"),
+             payload.get("environment_info"), # Sử dụng environment_info
+             payload.get("agent_version"),
              allow_cache=False
          )
+         # -------------------------------------------
 
          if success:
              logging.info(f"Successfully resent cached payload: {filepath.name}")
@@ -312,24 +342,41 @@ async def _process_single_cached_file(session, obs_engine_url, filepath):
          logging.error(f"Unexpected error processing cached file {filepath}: {e}", exc_info=True)
          return False, filepath # Coi như thất bại
 
-# --- Chuyển thành hàm async, thêm retry ---
-async def send_data_to_obs_engine_async(session, obs_engine_url, cluster_name, agent_id, pod_key, initial_reasons, k8s_context, logs, cluster_info, agent_version, allow_cache=True, max_retries=2, initial_delay=5):
-    """Sends data to ObsEngine asynchronously with retry."""
+# --- Chuyển thành hàm async, thêm retry, cập nhật payload ---
+async def send_data_to_obs_engine_async(
+        session, obs_engine_url,
+        environment_name, agent_id, environment_type, resource_type, resource_name,
+        initial_reasons, environment_context, logs, environment_info, agent_version,
+        allow_cache=True, max_retries=2, initial_delay=5):
+    """Sends data to ObsEngine asynchronously with retry using the generic structure."""
     if not obs_engine_url: logging.error(f"ObsEngine URL not configured..."); return False
     if not agent_id: logging.error(f"AGENT_ID not configured..."); return False
+    if not environment_name: logging.warning(f"Environment Name not provided for agent {agent_id}. Using default."); environment_name = config_manager.DEFAULT_K8S_CLUSTER_NAME
+    if not environment_type: logging.error(f"ENVIRONMENT_TYPE not provided for agent {agent_id}. Cannot send data."); return False
+    if not resource_name: logging.error(f"Resource Name not provided for agent {agent_id}. Cannot send data."); return False
 
     endpoint = obs_engine_url.rstrip('/') + "/collect" # Đảm bảo đúng endpoint
-    payload = {
-        "cluster_name": cluster_name, "agent_id": agent_id, "pod_key": pod_key,
-        "collection_timestamp": datetime.now(timezone.utc).isoformat(),
-        "initial_reasons": initial_reasons, "k8s_context": k8s_context, "logs": logs,
-        "cluster_info": cluster_info, "agent_version": agent_version
-    }
 
-    log_payload = {k: v for k, v in payload.items() if k not in ['logs', 'k8s_context']}
+    # --- Xây dựng payload theo cấu trúc mới ---
+    payload = {
+        "environment_name": environment_name,
+        "agent_id": agent_id,
+        "environment_type": environment_type,
+        "resource_type": resource_type,
+        "resource_name": resource_name,
+        "collection_timestamp": datetime.now(timezone.utc).isoformat(),
+        "initial_reasons": initial_reasons,
+        "environment_context": environment_context, # Đổi tên từ k8s_context
+        "logs": logs,
+        "environment_info": environment_info, # Đổi tên từ cluster_info
+        "agent_version": agent_version
+    }
+    # ----------------------------------------
+
+    log_payload_preview = {k: v for k, v in payload.items() if k not in ['logs', 'environment_context']}
     try: log_payload_size = len(json.dumps(payload))
     except Exception: log_payload_size = -1
-    logging.debug(f"Attempting to send payload (Agent: {agent_id}, Pod: {pod_key}, Size: ~{log_payload_size} bytes, Version: {agent_version})")
+    logging.debug(f"Attempting to send payload (Agent: {agent_id}, Env: {environment_name}, Resource: {resource_name}, Size: ~{log_payload_size} bytes, Version: {agent_version})")
 
     retries = 0
     delay = initial_delay
@@ -345,28 +392,28 @@ async def send_data_to_obs_engine_async(session, obs_engine_url, cluster_name, a
                     else:
                          # Log lỗi không retry và trả về False
                          error_text = await response.text()
-                         logging.error(f"ObsEngine returned non-retryable error {response.status} for {pod_key}: {error_text[:500]}")
+                         logging.error(f"ObsEngine returned non-retryable error {response.status} for {environment_name}/{resource_name}: {error_text[:500]}")
                          if allow_cache: _cache_failed_payload(payload)
                          return False
                 # Nếu thành công (2xx)
-                logging.info(f"Successfully sent data for {pod_key} (Agent: {agent_id}). Status: {response.status}")
+                logging.info(f"Successfully sent data for {environment_name}/{resource_name} (Agent: {agent_id}). Status: {response.status}")
                 return True
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             last_exception = e
             retries += 1
-            logging.warning(f"Error sending data for {pod_key} ({type(e).__name__}). Retrying ({retries}/{max_retries}) in {delay}s...")
+            logging.warning(f"Error sending data for {environment_name}/{resource_name} ({type(e).__name__}). Retrying ({retries}/{max_retries}) in {delay}s...")
             if retries > max_retries:
-                logging.error(f"Send data failed after {max_retries} retries for {pod_key}: {last_exception}")
+                logging.error(f"Send data failed after {max_retries} retries for {environment_name}/{resource_name}: {last_exception}")
                 if allow_cache: _cache_failed_payload(payload)
                 return False
             await asyncio.sleep(delay + random.uniform(0, 1)) # Thêm jitter
             delay *= 2
         except Exception as e:
-            logging.error(f"Unexpected error sending data for {pod_key}: {e}", exc_info=True)
+            logging.error(f"Unexpected error sending data for {environment_name}/{resource_name}: {e}", exc_info=True)
             if allow_cache: _cache_failed_payload(payload)
             return False # Lỗi không mong muốn, không retry
 
-    logging.error(f"Send data failed definitively after retries for {pod_key}: {last_exception}")
+    logging.error(f"Send data failed definitively after retries for {environment_name}/{resource_name}: {last_exception}")
     if allow_cache: _cache_failed_payload(payload)
     return False
 
@@ -381,7 +428,9 @@ async def perform_monitoring_cycle(session):
     config = await config_manager.get_config(session)
     current_scan_interval = config.get('scan_interval_seconds', 30)
     obs_engine_url = config.get('obs_engine_url')
-    cluster_name = config.get('cluster_name')
+    # --- Đổi tên cluster_name thành environment_name ---
+    environment_name = config.get('environment_name') # Lấy tên môi trường từ config
+    # ---------------------------------------------
     agent_id = config.get('agent_id')
 
     # Gửi lại cache bất đồng bộ
@@ -390,85 +439,98 @@ async def perform_monitoring_cycle(session):
     else:
         logging.warning("OBS_ENGINE_URL not set, skipping resend of cached payloads.")
 
-    # Lấy cluster summary bất đồng bộ
-    cluster_summary_task = asyncio.create_task(get_cached_cluster_summary())
+    # --- Lấy environment_info (thay cho cluster summary) ---
+    environment_info_task = asyncio.create_task(get_cached_cluster_summary()) # Vẫn gọi hàm cũ vì agent này là K8s
+    # -------------------------------------------------------
 
     if not obs_engine_url or not agent_id:
         logging.error("OBS_ENGINE_URL or AGENT_ID is not configured. Agent cannot operate correctly.")
-        # Vẫn đợi cluster summary xong trước khi sleep
-        await cluster_summary_task
+        await environment_info_task # Đợi task hoàn thành
         sleep_time = max(0, current_scan_interval - (time.perf_counter() - cycle_start_ts_perf))
         logging.info(f"--- Cycle finished early (config missing). Sleeping for {sleep_time:.2f}s ---")
         await asyncio.sleep(sleep_time)
         return
 
-    if not cluster_name or cluster_name == config_manager.DEFAULT_K8S_CLUSTER_NAME:
-        logging.warning(f"K8S_CLUSTER_NAME not set or using default.")
+    if not environment_name or environment_name == config_manager.DEFAULT_K8S_CLUSTER_NAME:
+        logging.warning(f"ENVIRONMENT_NAME (K8S_CLUSTER_NAME) not set or using default.")
 
     monitored_namespaces = config.get('monitored_namespaces', [])
 
-    if not monitored_namespaces:
+    if not monitored_namespaces: # Logic này vẫn đúng cho K8s agent
         logging.warning("No namespaces configured for monitoring. Skipping K8s/Loki scan.")
-        await cluster_summary_task # Đảm bảo task hoàn thành
+        await environment_info_task # Đảm bảo task hoàn thành
         cycle_duration = time.perf_counter() - cycle_start_ts_perf
         sleep_time = max(0, current_scan_interval - cycle_duration)
         logging.info(f"--- Cycle finished early (no namespaces) in {cycle_duration:.2f}s. Sleeping for {sleep_time:.2f} seconds... ---")
         await asyncio.sleep(sleep_time)
         return
 
-    logging.info(f"Agent ID: {agent_id} | Cluster Name: {cluster_name}")
+    logging.info(f"Agent ID: {agent_id} | Environment Name: {environment_name} | Type: {ENVIRONMENT_TYPE}")
     logging.info(f"Currently monitoring {len(monitored_namespaces)} namespaces: {', '.join(monitored_namespaces)}")
 
-    # Xác định pod cần điều tra (đã bao gồm K8s và Loki scan song song)
-    pods_to_investigate = await identify_pods_to_investigate(session, monitored_namespaces, start_cycle_time_dt, config)
+    # --- Xác định resource cần điều tra ---
+    # Hàm này vẫn trả về key là "namespace/pod_name" cho K8s agent
+    resources_to_investigate = await identify_pods_to_investigate(session, monitored_namespaces, start_cycle_time_dt, config)
+    # ------------------------------------
 
-    # Đợi lấy cluster summary (nếu chưa xong)
-    cluster_summary = await cluster_summary_task
+    # --- Đợi lấy environment_info ---
+    environment_info = await environment_info_task
+    # -------------------------------
 
-    # Thu thập và gửi dữ liệu cho các pod song song
+    # Thu thập và gửi dữ liệu cho các resource song song
     collection_tasks = []
-    if pods_to_investigate:
-         logging.info(f"Creating data collection tasks for {len(pods_to_investigate)} pods...")
-         for pod_key, data in pods_to_investigate.items():
+    if resources_to_investigate:
+         logging.info(f"Creating data collection tasks for {len(resources_to_investigate)} resources...")
+         # Key của dict này là "namespace/pod_name"
+         for resource_key, data in resources_to_investigate.items():
              try:
-                 namespace, pod_name = pod_key.split('/', 1)
+                 # --- Tách resource_key thành namespace và resource_name_part ---
+                 namespace, resource_name_part = resource_key.split('/', 1)
+                 resource_type = data.get("resource_type", "unknown") # Lấy resource_type đã thêm ở identify_pods...
+                 # -------------------------------------------------------------
                  initial_reasons = data.get("reason", [])
                  suspicious_logs = data.get("logs", [])
-                 # Tạo task cho mỗi pod
+                 # Tạo task cho mỗi resource
                  collection_tasks.append(asyncio.create_task(
-                     process_single_pod(session, namespace, pod_name, initial_reasons, suspicious_logs, config, cluster_summary, obs_engine_url, agent_id, cluster_name)
+                     process_single_resource(session, namespace, resource_name_part, resource_type, initial_reasons, suspicious_logs, config, environment_info, obs_engine_url, agent_id, environment_name)
                  ))
              except ValueError:
-                  logging.error(f"Invalid pod_key format found: {pod_key}. Skipping.")
+                  logging.error(f"Invalid resource_key format found: {resource_key}. Skipping.")
                   continue
              except Exception as task_create_err:
-                  logging.error(f"Error creating task for pod {pod_key}: {task_create_err}", exc_info=True)
+                  logging.error(f"Error creating task for resource {resource_key}: {task_create_err}", exc_info=True)
 
     # Đợi tất cả các task thu thập/gửi hoàn thành
     if collection_tasks:
         await asyncio.gather(*collection_tasks)
-        logging.info(f"Finished processing {len(collection_tasks)} pods.")
+        logging.info(f"Finished processing {len(collection_tasks)} resources.")
 
     cycle_duration = time.perf_counter() - cycle_start_ts_perf
     sleep_time = max(0, current_scan_interval - cycle_duration)
     logging.info(f"--- Cycle finished in {cycle_duration:.2f}s. Sleeping for {sleep_time:.2f} seconds... ---")
     await asyncio.sleep(sleep_time) # Dùng asyncio.sleep
 
-# --- Hàm helper async để xử lý một pod ---
-async def process_single_pod(session, namespace, pod_name, initial_reasons, suspicious_logs, config, cluster_summary, obs_engine_url, agent_id, cluster_name):
-    """Collects details and sends data for a single pod asynchronously."""
-    pod_key = f"{namespace}/{pod_name}"
+# --- Hàm helper async để xử lý một resource ---
+async def process_single_resource(session, namespace, resource_name_part, resource_type, initial_reasons, suspicious_logs, config, environment_info, obs_engine_url, agent_id, environment_name):
+    """Collects details and sends data for a single resource asynchronously."""
+    # --- Xây dựng resource_name đầy đủ ---
+    resource_name = f"{namespace}/{resource_name_part}" # Đối với K8s, đây là namespace/pod_name
+    # -----------------------------------
     try:
-        logs_collected, k8s_context_str = await collect_pod_details(
-            session, namespace, pod_name, "; ".join(initial_reasons), suspicious_logs, config
+        # --- Gọi hàm thu thập chi tiết ---
+        logs_collected, environment_context_str = await collect_resource_details(
+            session, namespace, resource_name_part, "; ".join(initial_reasons), suspicious_logs, config
         )
+        # -------------------------------
+        # --- Gọi hàm gửi dữ liệu với cấu trúc mới ---
         await send_data_to_obs_engine_async(
-            session, obs_engine_url, cluster_name, agent_id, pod_key,
-            initial_reasons, k8s_context_str, logs_collected,
-            cluster_summary, AGENT_VERSION
+            session, obs_engine_url, environment_name, agent_id, ENVIRONMENT_TYPE, resource_type, resource_name,
+            initial_reasons, environment_context_str, logs_collected,
+            environment_info, AGENT_VERSION
         )
+        # -----------------------------------------
     except Exception as collection_err:
-        logging.error(f"Error during async data collection/sending loop for {pod_key}: {collection_err}", exc_info=True)
+        logging.error(f"Error during async data collection/sending loop for {environment_name}/{resource_name}: {collection_err}", exc_info=True)
 
 # --- Chuyển thành hàm async ---
 async def main_loop(session):
@@ -497,12 +559,14 @@ async def main_loop(session):
 # --- Cập nhật điểm vào chính ---
 async def main():
     """Main entry point for the async agent."""
-    logging.info(f"Collector Agent script execution started. Version: {AGENT_VERSION}")
+    logging.info(f"Collector Agent script execution started. Type: {ENVIRONMENT_TYPE}, Version: {AGENT_VERSION}")
 
-    # Khởi tạo K8s client trước
-    if not await k8s_monitor.initialize_k8s_client():
-        logging.critical("Failed to initialize Kubernetes client. Exiting.")
-        return # Thoát nếu không kết nối được K8s
+    # Khởi tạo K8s client trước (vẫn cần cho agent loại K8s)
+    if ENVIRONMENT_TYPE == "kubernetes":
+        if not await k8s_monitor.initialize_k8s_client():
+            logging.critical("Failed to initialize Kubernetes client for K8s agent. Exiting.")
+            return # Thoát nếu không kết nối được K8s
+    # (Trong tương lai, có thể thêm logic khởi tạo cho các loại agent khác ở đây)
 
     # Tạo ClientSession để tái sử dụng
     async with aiohttp.ClientSession() as session:
@@ -513,9 +577,12 @@ async def main():
         logging.info(f"Agent ID: {initial_config.get('agent_id', 'Not Set')}")
         logging.info(f"Loki URL: {initial_config.get('loki_url', 'Not Set')}")
         logging.info(f"ObsEngine URL: {initial_config.get('obs_engine_url', 'Not Set')}")
-        logging.info(f"Cluster Name: {initial_config.get('cluster_name', 'Not Set')}")
+        # --- Đổi tên cluster_name thành environment_name ---
+        logging.info(f"Environment Name: {initial_config.get('environment_name', 'Not Set')}")
+        # ---------------------------------------------
         logging.info(f"Scan Interval: {initial_config.get('scan_interval_seconds', 'Default')}s")
-        logging.info(f"Monitored Namespaces: {initial_config.get('monitored_namespaces', 'Default')}")
+        if ENVIRONMENT_TYPE == "kubernetes":
+            logging.info(f"Monitored Namespaces: {initial_config.get('monitored_namespaces', 'Default')}")
 
         logging.info("Starting main monitoring loop...")
         await main_loop(session) # Chạy vòng lặp chính
@@ -528,17 +595,17 @@ if __name__ == "__main__":
     except Exception as main_err:
         logging.critical(f"Unhandled exception in main execution: {main_err}", exc_info=True)
     finally:
-        # --- Đảm bảo K8s client được đóng ---
-        if k8s_monitor.k8s_client_initialized and k8s_monitor.k8s_core_v1:
+        # --- Đảm bảo K8s client được đóng nếu đã khởi tạo ---
+        if ENVIRONMENT_TYPE == "kubernetes" and k8s_monitor.k8s_client_initialized and k8s_monitor.k8s_core_v1:
              try:
                  # Cần chạy hàm shutdown bất đồng bộ
                  async def shutdown_k8s():
-                     if k8s_monitor.k8s_core_v1.api_client:
+                     if hasattr(k8s_monitor.k8s_core_v1, 'api_client') and k8s_monitor.k8s_core_v1.api_client:
                          await k8s_monitor.k8s_core_v1.api_client.close()
                          logging.info("Kubernetes API client closed.")
                  asyncio.run(shutdown_k8s())
              except Exception as close_err:
                  logging.error(f"Error closing Kubernetes client: {close_err}")
-        # ---------------------------------
+        # -------------------------------------------------
         logging.info("Collector Agent shutdown complete.")
 

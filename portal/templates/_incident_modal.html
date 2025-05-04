@@ -7,17 +7,28 @@
             </button>
         </div>
 
+        {# Updated Information Grid #}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 mb-5">
             <div><span class="modal-label">Thời gian</span><span class="modal-value-simple modal-value-block text-gray-800" id="modal-timestamp"></span></div>
-            <div><span class="modal-label">Tài nguyên</span><span class="modal-value-simple modal-value-block text-gray-800" id="modal-pod-key"></span></div>
+            <div><span class="modal-label">Môi trường</span><span class="modal-value-simple modal-value-block text-gray-800" id="modal-environment-name"></span></div>
+            <div><span class="modal-label">Loại Môi trường</span><span class="modal-value-simple modal-value-block text-gray-800" id="modal-environment-type"></span></div>
+            <div><span class="modal-label">Tài nguyên</span><span class="modal-value-simple modal-value-block text-gray-800" id="modal-resource-name"></span></div>
+            <div><span class="modal-label">Loại Tài nguyên</span><span class="modal-value-simple modal-value-block text-gray-800" id="modal-resource-type"></span></div>
             <div><span class="modal-label">Mức độ</span><span class="modal-value-simple modal-value-block" id="modal-severity"></span></div>
-            <div><span class="modal-label">Lý do phát hiện</span><span class="modal-value-simple modal-value-block text-gray-800" id="modal-initial-reasons"></span></div>
+            {# Removed Pod Key, Initial Reasons moved below #}
+        </div>
+
+        <div class="modal-section">
+            <span class="modal-label">Lý do phát hiện ban đầu</span>
+            <p class="modal-value-simple text-gray-800" id="modal-initial-reasons"></p>
         </div>
 
         <div class="modal-section">
             <span class="modal-label">Tóm tắt</span>
             <p class="modal-value-simple text-gray-800" id="modal-summary"></p>
         </div>
+
+        {# AI Details (Keep logic as is, just ensure elements exist) #}
         <div class="modal-section ai-details" style="display: none;"> <span class="modal-label">Nguyên nhân gốc có thể</span>
             <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-root-cause"></div>
         </div>
@@ -25,14 +36,19 @@
             <span class="modal-label">Đề xuất khắc phục</span>
             <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-troubleshooting-steps"></div>
         </div>
+
         <div class="modal-section">
             <span class="modal-label">Log mẫu</span>
             <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-sample-logs"></div>
         </div>
+
+        {# Updated Context Section #}
         <div class="modal-section">
-            <span class="modal-label">Ngữ cảnh Môi trường</span>
-            <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-k8s-context"></div>
+            <span class="modal-label">Chi tiết Môi trường / Ngữ cảnh</span> {# Renamed Label #}
+            <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-environment-context"></div> {# Renamed ID #}
         </div>
+
+        {# AI Prompt/Response (Keep logic as is) #}
         <div class="modal-section ai-details" style="display: none;">
             <span class="modal-label">Prompt đã gửi cho AI</span>
             <div class="modal-value bg-gray-100 text-gray-800 border-gray-200" id="modal-input-prompt"></div>
