@@ -60,8 +60,10 @@ const saveAgentGeneralConfigButton = document.getElementById('save-agent-general
 const saveAgentGeneralConfigStatus = document.getElementById('save-agent-general-config-status');
 const agentNamespaceListDiv = document.getElementById('agent-namespace-list');
 const agentNamespaceLoadingText = document.getElementById('agent-namespace-loading-text');
-const saveAgentNsConfigButton = document.getElementById('save-agent-ns-config-button');
-const saveAgentNsConfigStatus = document.getElementById('save-agent-ns-config-status');
+const saveAgentK8sConfigButton = document.getElementById('save-agent-k8s-config-button'); // Renamed from saveAgentNsConfigButton
+const saveAgentK8sConfigStatus = document.getElementById('save-agent-k8s-config-status'); // Renamed from saveAgentNsConfigStatus
+const saveAgentLinuxConfigButton = document.getElementById('save-agent-linux-config-button'); // New button for Linux
+const saveAgentLinuxConfigStatus = document.getElementById('save-agent-linux-config-status'); // New status for Linux
 const closeAgentConfigButton = document.getElementById('close-agent-config-button');
 
 const usersTableBody = document.getElementById('users-table-body');
@@ -391,7 +393,7 @@ async function handleConfigureAgentClick(agentId, environmentName, environmentTy
 
     currentConfiguringAgentId = agentId;
     ui.showLoading();
-    const statuses = [saveAgentGeneralConfigStatus, saveAgentNsConfigStatus];
+    const statuses = [saveAgentGeneralConfigStatus, saveAgentK8sConfigStatus, saveAgentLinuxConfigStatus];
     statuses.forEach(el => { if (el) el.classList.add('hidden'); });
 
     ui.setText(configAgentIdSpan, agentId);
@@ -409,21 +411,12 @@ async function handleConfigureAgentClick(agentId, environmentName, environmentTy
 
         if (environmentType === 'kubernetes') {
             await renderAgentNamespaceList(agentConfig.monitored_namespaces || []);
-             const nsButton = document.querySelector('.agent-config-tab[data-tab="agent-k8s"]');
-             if(nsButton) nsButton.classList.remove('hidden');
-             const nsContent = document.getElementById('agent-k8s-tab');
-             if(nsContent) nsContent.classList.remove('hidden');
         } else {
              if(agentNamespaceListDiv) agentNamespaceListDiv.innerHTML = '';
              if(agentNamespaceLoadingText) agentNamespaceLoadingText.classList.add('hidden');
-             const nsButton = document.querySelector('.agent-config-tab[data-tab="agent-k8s"]');
-             if(nsButton) nsButton.classList.add('hidden');
-             const nsContent = document.getElementById('agent-k8s-tab');
-             if(nsContent) nsContent.classList.add('hidden');
         }
 
         agentConfigSection.classList.remove('hidden');
-        switchAgentConfigTab('agent-general');
 
 
     } catch (error) {
@@ -509,24 +502,17 @@ async function handleSaveAgentGeneralConfig() {
 
     let configData = {};
     try {
-        const scanInterval = parseInt(document.getElementById('agent-scan-interval')?.value ?? '0');
-        const scanLevel = document.getElementById('agent-loki-scan-level')?.value ?? 'INFO';
+        const scanIntervalInput = document.getElementById('agent-scan-interval');
+        const scanLevelSelect = document.getElementById('agent-loki-scan-level');
+
+        const scanInterval = parseInt(scanIntervalInput?.value ?? '0');
+        const scanLevel = scanLevelSelect?.value ?? 'INFO';
 
         if (isNaN(scanInterval) || scanInterval < 10) {
             throw new Error("Tần suất quét phải là số >= 10.");
         }
         configData.scan_interval_seconds = scanInterval;
-        configData.loki_scan_min_level = scanLevel;
-
-        const restartThresholdInput = document.getElementById('agent-restart-threshold');
-        const k8sTab = document.getElementById('agent-k8s-tab');
-        if (restartThresholdInput && k8sTab && !k8sTab.classList.contains('hidden')) {
-             const restartThreshold = parseInt(restartThresholdInput.value ?? '0');
-             if (isNaN(restartThreshold) || restartThreshold < 1) {
-                 throw new Error("Ngưỡng khởi động lại phải là số >= 1.");
-             }
-             configData.restart_count_threshold = restartThreshold;
-        }
+        configData.loki_scan_min_level = scanLevel; // Include Loki level even if not K8s, backend might ignore
 
         await api.saveAgentGeneralConfig(currentConfiguringAgentId, configData);
         ui.showStatusMessage(saveAgentGeneralConfigStatus, 'Đã lưu thành công!', 'success');
@@ -549,36 +535,126 @@ async function handleSaveAgentGeneralConfig() {
 }
 
 
-async function handleSaveAgentNamespaces() {
-    if (!currentConfiguringAgentId || !saveAgentNsConfigButton || !saveAgentNsConfigStatus || !agentNamespaceListDiv) return;
+async function handleSaveAgentK8sConfig() {
+    if (!currentConfiguringAgentId || !saveAgentK8sConfigButton || !saveAgentK8sConfigStatus || !agentNamespaceListDiv) return;
 
-    const nsTabContent = document.getElementById('agent-k8s-tab');
-    if (!nsTabContent || nsTabContent.classList.contains('hidden')) {
-        console.warn("Attempted to save namespaces for a non-K8s agent or hidden tab.");
+    const k8sTabContent = document.getElementById('agent-k8s-tab');
+    if (!k8sTabContent || k8sTabContent.classList.contains('hidden')) {
+        console.warn("Attempted to save K8s config for a non-K8s agent or hidden tab.");
         return;
     }
 
     ui.showLoading();
-    saveAgentNsConfigButton.disabled = true;
-    ui.showStatusMessage(saveAgentNsConfigStatus, 'Đang lưu...', 'info');
+    saveAgentK8sConfigButton.disabled = true;
+    ui.showStatusMessage(saveAgentK8sConfigStatus, 'Đang lưu...', 'info');
 
     const selectedNamespaces = [];
     agentNamespaceListDiv.querySelectorAll('input[type="checkbox"]:checked').forEach(checkbox => {
         selectedNamespaces.push(checkbox.value);
     });
 
+    let k8sSpecificConfig = {};
     try {
-        await api.saveAgentMonitoredNamespaces(currentConfiguringAgentId, selectedNamespaces);
-        ui.showStatusMessage(saveAgentNsConfigStatus, 'Đã lưu thành công!', 'success');
+        const restartThresholdInput = document.getElementById('agent-restart-threshold');
+        const restartThreshold = parseInt(restartThresholdInput?.value ?? '0');
+        if (isNaN(restartThreshold) || restartThreshold < 1) {
+            throw new Error("Ngưỡng khởi động lại phải là số >= 1.");
+        }
+        k8sSpecificConfig.restart_count_threshold = restartThreshold;
+
+        const nsPromise = api.saveAgentMonitoredNamespaces(currentConfiguringAgentId, selectedNamespaces);
+        const generalPromise = api.saveAgentGeneralConfig(currentConfiguringAgentId, k8sSpecificConfig);
+
+        await Promise.all([nsPromise, generalPromise]);
+
+        ui.showStatusMessage(saveAgentK8sConfigStatus, 'Đã lưu thành công!', 'success');
 
     } catch (error) {
-        console.error(`Error saving namespaces for agent ${currentConfiguringAgentId}:`, error);
-        ui.showStatusMessage(saveAgentNsConfigStatus, `Lỗi: ${error.message}`, 'error');
+        console.error(`Error saving K8s config for agent ${currentConfiguringAgentId}:`, error);
+        if (error.message.includes("phải là số")) {
+             alert(`Lỗi dữ liệu nhập: ${error.message}`);
+             if(saveAgentK8sConfigStatus) saveAgentK8sConfigStatus.classList.add('hidden');
+        } else {
+             ui.showStatusMessage(saveAgentK8sConfigStatus, `Lỗi: ${error.message}`, 'error');
+        }
     } finally {
         ui.hideLoading();
-        saveAgentNsConfigButton.disabled = false;
-        if (saveAgentNsConfigStatus && !saveAgentNsConfigStatus.textContent.startsWith('Lỗi')) {
-            ui.hideStatusMessage(saveAgentNsConfigStatus);
+        saveAgentK8sConfigButton.disabled = false;
+        if (saveAgentK8sConfigStatus && !saveAgentK8sConfigStatus.textContent.startsWith('Lỗi')) {
+            ui.hideStatusMessage(saveAgentK8sConfigStatus);
+        }
+    }
+}
+
+async function handleSaveAgentLinuxConfig() {
+    if (!currentConfiguringAgentId || !saveAgentLinuxConfigButton || !saveAgentLinuxConfigStatus) return;
+
+    const linuxTabContent = document.getElementById('agent-linux-tab');
+    if (!linuxTabContent || linuxTabContent.classList.contains('hidden')) {
+        console.warn("Attempted to save Linux config for a non-Linux agent or hidden tab.");
+        return;
+    }
+
+    ui.showLoading();
+    saveAgentLinuxConfigButton.disabled = true;
+    ui.showStatusMessage(saveAgentLinuxConfigStatus, 'Đang lưu...', 'info');
+
+    let linuxConfigData = {};
+    try {
+        const cpuThreshold = parseFloat(document.getElementById('agent-cpu-threshold')?.value ?? '90.0');
+        const memThreshold = parseFloat(document.getElementById('agent-mem-threshold')?.value ?? '90.0');
+        const diskThresholdsStr = document.getElementById('agent-disk-thresholds')?.value ?? '{}';
+        const monitoredServicesStr = document.getElementById('agent-monitored-services')?.value ?? '';
+        const monitoredLogsStr = document.getElementById('agent-monitored-logs')?.value ?? '[]';
+        const logKeywordsStr = document.getElementById('agent-log-scan-keywords')?.value ?? '';
+        const logScanRange = parseInt(document.getElementById('agent-log-scan-range')?.value ?? '5');
+        const logContextMinutes = parseInt(document.getElementById('agent-log-context-minutes')?.value ?? '30');
+
+        if (isNaN(cpuThreshold) || cpuThreshold < 0 || cpuThreshold > 100) throw new Error("Ngưỡng CPU không hợp lệ.");
+        if (isNaN(memThreshold) || memThreshold < 0 || memThreshold > 100) throw new Error("Ngưỡng Memory không hợp lệ.");
+        if (isNaN(logScanRange) || logScanRange < 1) throw new Error("Khoảng thời gian quét Log không hợp lệ.");
+        if (isNaN(logContextMinutes) || logContextMinutes < 1) throw new Error("Thời gian lấy Context Log không hợp lệ.");
+
+        linuxConfigData.cpu_threshold_percent = cpuThreshold;
+        linuxConfigData.mem_threshold_percent = memThreshold;
+
+        try {
+            linuxConfigData.disk_thresholds = JSON.parse(diskThresholdsStr);
+            if (typeof linuxConfigData.disk_thresholds !== 'object' || Array.isArray(linuxConfigData.disk_thresholds)) {
+                throw new Error("Disk Thresholds phải là một JSON object.");
+            }
+        } catch (e) {
+            throw new Error(`Lỗi định dạng JSON cho Disk Thresholds: ${e.message}`);
+        }
+
+        linuxConfigData.monitored_services = monitoredServicesStr.split('\n').map(s => s.trim()).filter(Boolean);
+
+        try {
+            linuxConfigData.monitored_logs = JSON.parse(monitoredLogsStr);
+             if (!Array.isArray(linuxConfigData.monitored_logs)) {
+                throw new Error("Monitored Logs phải là một JSON array.");
+            }
+        } catch (e) {
+            throw new Error(`Lỗi định dạng JSON cho Monitored Logs: ${e.message}`);
+        }
+
+        linuxConfigData.log_scan_keywords = logKeywordsStr.split(/[\n,]+/).map(k => k.trim()).filter(Boolean);
+        linuxConfigData.log_scan_range_minutes = logScanRange;
+        linux_config_data.log_context_minutes = logContextMinutes;
+
+
+        await api.saveAgentGeneralConfig(currentConfiguringAgentId, linuxConfigData);
+        ui.showStatusMessage(saveAgentLinuxConfigStatus, 'Đã lưu thành công!', 'success');
+
+    } catch (error) {
+        console.error(`Error saving Linux config for agent ${currentConfiguringAgentId}:`, error);
+        alert(`Lỗi lưu cấu hình Linux: ${error.message}`);
+        ui.showStatusMessage(saveAgentLinuxConfigStatus, `Lỗi: ${error.message}`, 'error');
+    } finally {
+        ui.hideLoading();
+        saveAgentLinuxConfigButton.disabled = false;
+        if (saveAgentLinuxConfigStatus && !saveAgentLinuxConfigStatus.textContent.startsWith('Lỗi')) {
+            ui.hideStatusMessage(saveAgentLinuxConfigStatus);
         }
     }
 }
@@ -706,7 +782,7 @@ function applyRolePermissions() {
     document.querySelector('a[href="#settings"]')?.parentElement?.classList.toggle('hidden', !isAdmin);
     document.querySelector('a[href="#user-management"]')?.parentElement?.classList.toggle('hidden', !isAdmin);
 
-    [saveTelegramConfigButton, saveAiConfigButton, saveAgentGeneralConfigButton, saveAgentNsConfigButton, createUserButton, saveUserChangesButton]
+    [saveTelegramConfigButton, saveAiConfigButton, saveAgentGeneralConfigButton, saveAgentK8sConfigButton, saveAgentLinuxConfigButton, createUserButton, saveUserChangesButton]
         .forEach(btn => { if(btn) btn.disabled = !isAdmin; });
 
     if (openCreateUserModalButton) openCreateUserModalButton.disabled = !isAdmin;
@@ -810,7 +886,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
     if (saveAgentGeneralConfigButton) saveAgentGeneralConfigButton.addEventListener('click', handleSaveAgentGeneralConfig);
-    if (saveAgentNsConfigButton) saveAgentNsConfigButton.addEventListener('click', handleSaveAgentNamespaces);
+    if (saveAgentK8sConfigButton) saveAgentK8sConfigButton.addEventListener('click', handleSaveAgentK8sConfig);
+    if (saveAgentLinuxConfigButton) saveAgentLinuxConfigButton.addEventListener('click', handleSaveAgentLinuxConfig); // Add listener for Linux save
     if (closeAgentConfigButton) closeAgentConfigButton.addEventListener('click', handleCloseAgentConfig);
     if (refreshAgentStatusButton) refreshAgentStatusButton.addEventListener('click', loadAgentStatus);
     if (addAgentButton) {

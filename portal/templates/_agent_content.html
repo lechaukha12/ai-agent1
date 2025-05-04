@@ -26,7 +26,6 @@
             <table id="agent-status-table" class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50">
                     <tr>
-                        {# Updated Headers #}
                         <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Môi trường / Agent ID</th>
                         <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loại Agent</th>
                         <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Trạng thái</th>
@@ -36,7 +35,6 @@
                     </tr>
                 </thead>
                 <tbody id="agent-status-table-body" class="bg-white divide-y divide-gray-200">
-                     {# Updated colspan #}
                     <tr><td colspan="6" class="text-center py-6 text-gray-500">Đang tải trạng thái agent...</td></tr>
                 </tbody>
             </table>
@@ -44,14 +42,12 @@
         <p id="agent-status-error" class="text-center text-red-500 hidden mt-4">Lỗi tải trạng thái agent.</p>
     </div>
 
-    {# Agent Configuration Section - Structure remains, JS will handle dynamic content #}
     <div id="agent-config-section" class="bg-white p-4 md:p-6 rounded-lg shadow border border-gray-200 hidden">
         <h3 class="text-xl font-semibold mb-4 text-gray-700">
             Cấu hình cho Agent: <span id="config-agent-id" class="font-mono text-blue-600"></span>
-            (<span id="config-agent-env-type" class="text-sm text-gray-600"></span>) {# Placeholder for Env Type #}
+            (<span id="config-agent-env-type" class="text-sm text-gray-600"></span>)
         </h3>
 
-        {# Tabs - Keep structure, JS might hide/show tabs #}
         <div class="border-b border-gray-200 mb-6">
             <nav class="-mb-px flex space-x-8" aria-label="Tabs">
                  <button data-tab="agent-general" class="agent-config-tab whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-indigo-500 text-indigo-600">
@@ -69,25 +65,25 @@
                  <button data-tab="agent-docker" class="agent-config-tab agent-config-tab-docker hidden whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">
                     Cấu hình Docker
                 </button>
-                 {# Add more tabs for other agent types if needed #}
             </nav>
         </div>
 
-        {# General Tab Content #}
         <div id="agent-general-tab" class="agent-config-tab-content space-y-6">
-             {# Environment Info Section - Will be populated by JS #}
              <div id="agent-environment-info-section" class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 mb-4 border-b pb-4 border-dashed">
-                 {# Content populated by JS based on agent type #}
-                 <p class="text-gray-500 text-sm col-span-full">Đang tải thông tin môi trường...</p>
+                 <p class="text-gray-500 text-sm col-span-full" id="agent-env-info-loading">Đang tải thông tin môi trường...</p>
+                 <div class="agent-env-info-item hidden"><strong>Hostname:</strong> <span id="agent-env-hostname"></span></div>
+                 <div class="agent-env-info-item hidden"><strong>OS:</strong> <span id="agent-env-os"></span></div>
+                 <div class="agent-env-info-item hidden"><strong>Kernel:</strong> <span id="agent-env-kernel"></span></div>
+                 <div class="agent-env-info-item hidden"><strong>Uptime:</strong> <span id="agent-env-uptime"></span></div>
+                 <div class="agent-env-info-item hidden"><strong>K8s Version:</strong> <span id="agent-env-k8s-version"></span></div>
+                 <div class="agent-env-info-item hidden"><strong>Node Count:</strong> <span id="agent-env-node-count"></span></div>
              </div>
-             {# General Settings Fields #}
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                     <label for="agent-scan-interval" class="form-label">Tần suất quét (giây)</label>
                     <input type="number" id="agent-scan-interval" name="scan_interval_seconds" min="10" step="1" class="form-input w-full">
                     <p class="form-description">Khoảng thời gian giữa các lần quét (tối thiểu 10).</p>
                 </div>
-                 {# Loki scan level might be common #}
                  <div>
                     <label for="agent-loki-scan-level" class="form-label">Mức log quét Loki tối thiểu (Nếu dùng Loki)</label>
                     <select id="agent-loki-scan-level" name="loki_scan_min_level" class="form-select w-full">
@@ -99,7 +95,6 @@
                     </select>
                     <p class="form-description">Mức log tối thiểu để agent quét ban đầu qua Loki.</p>
                 </div>
-                 {# Add other common settings here if any #}
             </div>
             <div class="flex justify-end items-center pt-4">
                  <span id="save-agent-general-config-status" class="text-sm mr-4 hidden"></span>
@@ -109,7 +104,6 @@
             </div>
         </div>
 
-        {# Kubernetes Specific Tab Content #}
         <div id="agent-k8s-tab" class="agent-config-tab-content agent-config-tab-k8s hidden space-y-6">
             <p class="text-sm text-gray-600">Cấu hình dành riêng cho agent giám sát Kubernetes.</p>
              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -119,34 +113,77 @@
                     <p class="form-description">Số lần khởi động lại để coi là sự cố.</p>
                 </div>
              </div>
-             {# Namespace Selection #}
              <p class="text-sm text-gray-600 mt-4">Chọn các namespace Kubernetes bạn muốn agent này theo dõi.</p>
              <div id="agent-namespace-list" class="namespace-list border border-gray-300 rounded-md p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 mb-5">
                  <p id="agent-namespace-loading-text" class="text-gray-500 col-span-full text-center py-4">Chọn agent để tải namespace...</p>
              </div>
              <div class="flex justify-end items-center pt-4">
-                 <span id="save-agent-k8s-config-status" class="text-sm mr-4 hidden"></span> {# New status element #}
+                 <span id="save-agent-k8s-config-status" class="text-sm mr-4 hidden"></span>
                  <button id="save-agent-k8s-config-button" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-5 rounded-lg shadow transition duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
                      Lưu Cấu hình K8s
-                 </button> {# Renamed button #}
+                 </button>
              </div>
         </div>
 
-         {# Placeholder Tabs for other agent types #}
          <div id="agent-linux-tab" class="agent-config-tab-content agent-config-tab-linux hidden space-y-6">
-             <p class="text-gray-500">Cấu hình cho Linux Agent (chưa triển khai).</p>
-             {# Add Linux specific fields here #}
+             <p class="text-sm text-gray-600">Cấu hình dành riêng cho agent giám sát Linux.</p>
+             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                 <div>
+                     <label for="agent-cpu-threshold" class="form-label">Ngưỡng CPU (%)</label>
+                     <input type="number" id="agent-cpu-threshold" name="cpu_threshold_percent" min="1" max="100" step="0.1" class="form-input w-full">
+                     <p class="form-description">Ngưỡng % CPU sử dụng để cảnh báo.</p>
+                 </div>
+                 <div>
+                     <label for="agent-mem-threshold" class="form-label">Ngưỡng Memory (%)</label>
+                     <input type="number" id="agent-mem-threshold" name="mem_threshold_percent" min="1" max="100" step="0.1" class="form-input w-full">
+                     <p class="form-description">Ngưỡng % Memory sử dụng để cảnh báo.</p>
+                 </div>
+                 <div class="md:col-span-2">
+                     <label for="agent-disk-thresholds" class="form-label">Ngưỡng Disk (%)</label>
+                     <textarea id="agent-disk-thresholds" name="disk_thresholds" rows="3" class="form-textarea w-full font-mono text-sm" placeholder='Ví dụ: {"/": 85.0, "/data": 90.0}'></textarea>
+                     <p class="form-description">Nhập dưới dạng JSON object: {"đường_dẫn": ngưỡng_phần_trăm}.</p>
+                 </div>
+                 <div class="md:col-span-2">
+                     <label for="agent-monitored-services" class="form-label">Dịch vụ Systemd cần theo dõi</label>
+                     <textarea id="agent-monitored-services" name="monitored_services" rows="4" class="form-textarea w-full font-mono text-sm" placeholder="Ví dụ: nginx.service&#10;docker.service&#10;mysql.service"></textarea>
+                     <p class="form-description">Nhập mỗi tên service trên một dòng.</p>
+                 </div>
+                 <div class="md:col-span-2">
+                     <label for="agent-monitored-logs" class="form-label">Log cần quét</label>
+                     <textarea id="agent-monitored-logs" name="monitored_logs" rows="5" class="form-textarea w-full font-mono text-sm" placeholder='Ví dụ JSON array:&#10;[{"path": "/var/log/nginx/error.log"}, {"type": "journal", "unit": "docker.service"}]'></textarea>
+                     <p class="form-description">Nhập dưới dạng JSON array. Mỗi object có thể có "path" (cho file), "type" ("file" hoặc "journal"), "unit" (cho journal).</p>
+                 </div>
+                 <div class="md:col-span-2">
+                     <label for="agent-log-scan-keywords" class="form-label">Từ khóa quét Log</label>
+                     <textarea id="agent-log-scan-keywords" name="log_scan_keywords" rows="3" class="form-textarea w-full font-mono text-sm" placeholder="Ví dụ: error, warn, critical, denied"></textarea>
+                     <p class="form-description">Nhập các từ khóa, cách nhau bởi dấu phẩy hoặc mỗi từ trên một dòng.</p>
+                 </div>
+                 <div>
+                     <label for="agent-log-scan-range" class="form-label">Khoảng thời gian quét Log (phút)</label>
+                     <input type="number" id="agent-log-scan-range" name="log_scan_range_minutes" min="1" step="1" class="form-input w-full">
+                     <p class="form-description">Quét log trong bao nhiêu phút gần nhất.</p>
+                 </div>
+                 <div>
+                     <label for="agent-log-context-minutes" class="form-label">Thời gian lấy Context Log (phút)</label>
+                     <input type="number" id="agent-log-context-minutes" name="log_context_minutes" min="1" step="1" class="form-input w-full">
+                     <p class="form-description">Lấy log xung quanh sự kiện trong bao nhiêu phút.</p>
+                 </div>
+             </div>
+             <div class="flex justify-end items-center pt-4">
+                 <span id="save-agent-linux-config-status" class="text-sm mr-4 hidden"></span>
+                 <button id="save-agent-linux-config-button" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-5 rounded-lg shadow transition duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+                     Lưu Cấu hình Linux
+                 </button>
+             </div>
          </div>
+
          <div id="agent-windows-tab" class="agent-config-tab-content agent-config-tab-windows hidden space-y-6">
              <p class="text-gray-500">Cấu hình cho Windows Agent (chưa triển khai).</p>
-             {# Add Windows specific fields here #}
          </div>
          <div id="agent-docker-tab" class="agent-config-tab-content agent-config-tab-docker hidden space-y-6">
              <p class="text-gray-500">Cấu hình cho Docker Agent (chưa triển khai).</p>
-             {# Add Docker specific fields here #}
          </div>
 
-        {# Close Button #}
         <div class="mt-8 pt-4 border-t border-gray-200 flex justify-end">
             <button id="close-agent-config-button" class="bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-200 ease-in-out">
                 Đóng
@@ -154,7 +191,6 @@
         </div>
     </div>
 
-    {# Add Agent Modal (Keep as is) #}
     <div id="add-agent-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 hidden items-center justify-center">
         <div class="relative mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white">
              <div class="flex justify-between items-center border-b pb-3 mb-4">
@@ -168,18 +204,14 @@
                 <p>Để thêm một agent mới, bạn cần triển khai nó trên môi trường đó (ví dụ: Kubernetes cluster, máy ảo Linux, Windows Server,...).</p>
                 <p>Các bước triển khai chung:</p>
                 <ol>
-                    <li>Chuẩn bị gói cài đặt hoặc manifest phù hợp với nền tảng (ví dụ: manifest K8s, script cài đặt cho VM).</li>
-                    <li>Cấu hình các thông số cần thiết cho agent, đặc biệt là:
+                    <li>Chuẩn bị gói cài đặt hoặc manifest phù hợp với nền tảng (ví dụ: manifest K8s, file binary `obsagent` cho Linux).</li>
+                    <li>Cấu hình các thông số cần thiết cho agent:
                         <ul>
-                            <li><code>OBS_ENGINE_URL</code>: Địa chỉ của ObsEngine API này (bắt buộc).</li>
-                            <li><code>AGENT_ID</code>: Tên định danh duy nhất cho agent này (ví dụ: <code>agent-k8s-prod-01</code>, <code>agent-linux-web-01</code>).</li>
-                            <li><code>ENVIRONMENT_NAME</code>: Tên định danh cho môi trường mà agent đang chạy (ví dụ: <code>k8s-prod-cluster</code>, <code>webserver-01</code>).</li>
-                            <li><code>ENVIRONMENT_TYPE</code>: Loại môi trường (<code>kubernetes</code>, <code>linux</code>, <code>windows</code>, <code>docker</code>...).</li>
-                            <li>Thông tin kết nối đến nguồn log (ví dụ: <code>LOKI_URL</code> cho Kubernetes, đường dẫn file log cho VM).</li>
-                            <li>(Tùy chọn) Cấu hình ban đầu cho các tham số như tần suất quét, mức log,... (có thể cấu hình lại qua giao diện sau).</li>
+                            <li>**Đối với K8s Agent:** Sử dụng ConfigMap/Secret để đặt biến môi trường (`OBS_ENGINE_URL`, `AGENT_ID`, `K8S_CLUSTER_NAME`, `LOKI_URL`,...).</li>
+                            <li>**Đối với Linux Agent:** Tạo file cấu hình `obsengine.cfg` (ví dụ: trong `/etc/obsagent/`) với các thông số `ObsEngineURL`, `AgentID`, `EnvironmentName`, và các tùy chọn giám sát khác.</li>
                         </ul>
                     </li>
-                    <li>Thực hiện triển khai agent trên môi trường mục tiêu (ví dụ: `kubectl apply`, chạy script cài đặt).</li>
+                    <li>Thực hiện triển khai agent trên môi trường mục tiêu (ví dụ: `kubectl apply`, chạy file binary `obsagent` dưới dạng service systemd).</li>
                 </ol>
                 <p>Sau khi triển khai và khởi chạy thành công, agent sẽ tự động kết nối và xuất hiện trong danh sách "Trạng thái Agent" ở trên.</p>
                 <p><em>Lưu ý: Chức năng tạo agent trực tiếp từ giao diện này chưa được hỗ trợ. Vui lòng tham khảo tài liệu triển khai chi tiết cho từng loại nền tảng.</em></p>

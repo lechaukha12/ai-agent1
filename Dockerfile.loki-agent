@@ -1,0 +1,33 @@
+# Sử dụng base image Python nhẹ
+FROM python:3.10-slim-bullseye
+
+# Đặt biến môi trường để Python ghi log không bị buffer
+ENV PYTHONUNBUFFERED=1
+
+# Tạo thư mục làm việc
+WORKDIR /app
+
+# Copy file requirements trước để tận dụng Docker cache
+COPY requirements.txt .
+
+# Cài đặt thư viện
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy mã nguồn của agent vào image
+COPY main.py .
+COPY config_manager.py .
+COPY loki_client.py .
+
+# Tạo thư mục cache (và cấp quyền nếu cần chạy non-root)
+# RUN mkdir /tmp/loki_agent_cache && chown <user>:<group> /tmp/loki_agent_cache
+# Lưu ý: Việc chạy non-root cần thêm user và điều chỉnh quyền
+
+# Lệnh mặc định để chạy agent khi container khởi động
+CMD ["python", "main.py"]
+
+# docker run -d --name my-loki-agent \
+#   -e OBS_ENGINE_URL="http://<your-obsengine-url>" \
+#   -e AGENT_ID="loki-agent-01" \
+#   -e ENVIRONMENT_NAME="production-loki-source" \
+#   -e LOG_LEVEL="INFO" \
+#   loki-agent:latest

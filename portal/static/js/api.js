@@ -1,18 +1,7 @@
-// portal/static/js/api.js
-
-/**
- * Fetches statistics data from the backend API.
- * @param {number} days - The number of days to fetch stats for (1, 7, or 30).
- * @param {string} [environmentFilter=''] - Filter stats by environment name.
- * @param {string} [envTypeFilter=''] - Filter stats by environment type.
- * @returns {Promise<object>} - A promise that resolves to the statistics data object.
- * @throws {Error} - Throws an error if the fetch or API call fails.
- */
 export async function fetchStats(days = 1, environmentFilter = '', envTypeFilter = '') {
     try {
-        // Add new filter parameters to the URL
         let url = `/api/stats?days=${days}&environment=${encodeURIComponent(environmentFilter)}&env_type=${encodeURIComponent(envTypeFilter)}`;
-        console.debug(`Fetching stats from: ${url}`); // Debug log
+        console.debug(`Fetching stats from: ${url}`);
         const response = await fetch(url);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -28,26 +17,13 @@ export async function fetchStats(days = 1, environmentFilter = '', envTypeFilter
     }
 }
 
-/**
- * Fetches incident data from the backend API with pagination and filtering.
- * @param {number} [page=1] - The page number to fetch.
- * @param {string} [resourceFilter=''] - Filter incidents by resource name (contains).
- * @param {string} [severityFilter=''] - Filter incidents by severity level.
- * @param {string} [environmentFilter=''] - Filter incidents by environment name (exact match).
- * @param {string} [envTypeFilter=''] - Filter incidents by environment type (exact match).
- * @param {string|null} [startDate=null] - Start date filter (ISO format string).
- * @param {string|null} [endDate=null] - End date filter (ISO format string).
- * @returns {Promise<object>} - A promise that resolves to the incident data object including incidents and pagination info.
- * @throws {Error} - Throws an error if the fetch or API call fails.
- */
 export async function fetchIncidents(page = 1, resourceFilter = '', severityFilter = '', environmentFilter = '', envTypeFilter = '', startDate = null, endDate = null) {
     try {
-        // Update URL parameters to match backend expectations
         let url = `/api/incidents?limit=20&page=${page}`;
-        url += `&resource=${encodeURIComponent(resourceFilter)}`; // Use 'resource' instead of 'pod'
+        url += `&resource=${encodeURIComponent(resourceFilter)}`;
         url += `&severity=${encodeURIComponent(severityFilter)}`;
-        url += `&environment=${encodeURIComponent(environmentFilter)}`; // Add environment filter
-        url += `&env_type=${encodeURIComponent(envTypeFilter)}`; // Add environment type filter
+        url += `&environment=${encodeURIComponent(environmentFilter)}`;
+        url += `&env_type=${encodeURIComponent(envTypeFilter)}`;
 
         if (startDate) {
             url += `&start_date=${startDate}`;
@@ -55,7 +31,7 @@ export async function fetchIncidents(page = 1, resourceFilter = '', severityFilt
         if (endDate) {
             url += `&end_date=${endDate}`;
         }
-        console.debug(`Fetching incidents from: ${url}`); // Debug log
+        console.debug(`Fetching incidents from: ${url}`);
 
         const response = await fetch(url);
         if (!response.ok) {
@@ -63,14 +39,13 @@ export async function fetchIncidents(page = 1, resourceFilter = '', severityFilt
             try {
                 const errorData = await response.json();
                 errorMsg = errorData.error || errorMsg;
-            } catch (e) { /* Ignore if response is not JSON */ }
+            } catch (e) { /* Ignore */ }
             throw new Error(errorMsg);
         }
         const data = await response.json();
         if (data.error) {
             throw new Error(`API Error: ${data.error}`);
         }
-        // No changes needed to the returned structure, backend handles it
         return data;
     } catch (error) {
         console.error('Lỗi fetch incidents:', error);
@@ -78,14 +53,9 @@ export async function fetchIncidents(page = 1, resourceFilter = '', severityFilt
     }
 }
 
-/**
- * Fetches the list of available Kubernetes namespaces (still needed for K8s agent config).
- * @returns {Promise<string[]>} - A promise that resolves to an array of namespace names.
- * @throws {Error} - Throws an error if the fetch or API call fails.
- */
 export async function fetchAvailableNamespaces() {
     try {
-        console.debug("Fetching available K8s namespaces..."); // Debug log
+        console.debug("Fetching available K8s namespaces...");
         const response = await fetch('/api/namespaces');
         if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
         const data = await response.json();
@@ -97,14 +67,9 @@ export async function fetchAvailableNamespaces() {
     }
 }
 
-/**
- * Fetches the status of all active agents.
- * @returns {Promise<object>} - A promise that resolves to the agent status data.
- * @throws {Error} - Throws an error if the fetch or API call fails.
- */
 export async function fetchAgentStatus() {
     try {
-        console.debug("Fetching agent status..."); // Debug log
+        console.debug("Fetching agent status...");
         const response = await fetch('/api/agents/status');
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -113,7 +78,6 @@ export async function fetchAgentStatus() {
         if (data.error) {
             throw new Error(`API Error: ${data.error}`);
         }
-        // Ensure the backend returns environment_type and environment_info
         return data;
     } catch (error) {
         console.error('Error fetching agent status:', error);
@@ -121,15 +85,9 @@ export async function fetchAgentStatus() {
     }
 }
 
-/**
- * Fetches the configuration for a specific agent.
- * @param {string} agentId - The ID of the agent.
- * @returns {Promise<object>} - A promise that resolves to the agent's configuration object.
- * @throws {Error} - Throws an error if the fetch or API call fails.
- */
 export async function fetchAgentConfig(agentId) {
     const endpoint = `/api/agents/${encodeURIComponent(agentId)}/config`;
-    console.debug(`Fetching config for agent: ${agentId} from ${endpoint}`); // Debug log
+    console.debug(`Fetching config for agent: ${agentId} from ${endpoint}`);
     try {
         const response = await fetch(endpoint);
         if (!response.ok) {
@@ -137,22 +95,29 @@ export async function fetchAgentConfig(agentId) {
              try {
                  const errorData = await response.json();
                  errorMsg = errorData.error || errorMsg;
-             } catch (e) { /* Ignore if response is not JSON */ }
+             } catch (e) { /* Ignore */ }
             throw new Error(errorMsg);
         }
         const config = await response.json();
         if (config.error) {
             throw new Error(`API Error: ${config.error}`);
         }
-        // Ensure backend returns necessary fields like environment_type, environment_info
+
         return {
             scan_interval_seconds: config.scan_interval_seconds ?? 30,
-            restart_count_threshold: config.restart_count_threshold ?? 5, // Keep for K8s
+            restart_count_threshold: config.restart_count_threshold ?? 5,
             loki_scan_min_level: config.loki_scan_min_level ?? 'INFO',
-            monitored_namespaces: Array.isArray(config.monitored_namespaces) ? config.monitored_namespaces : [], // Keep for K8s
-            environment_type: config.environment_type ?? 'unknown', // Expect this from backend
-            environment_info: config.environment_info ?? {}, // Expect this from backend
-            // Add other potential config fields here
+            monitored_namespaces: Array.isArray(config.monitored_namespaces) ? config.monitored_namespaces : [],
+            environment_type: config.environment_type ?? 'unknown',
+            environment_info: config.environment_info ?? {},
+            cpu_threshold_percent: config.cpu_threshold_percent ?? 90.0,
+            mem_threshold_percent: config.mem_threshold_percent ?? 90.0,
+            disk_thresholds: config.disk_thresholds ?? {'/': 90.0},
+            monitored_services: Array.isArray(config.monitored_services) ? config.monitored_services : [],
+            monitored_logs: Array.isArray(config.monitored_logs) ? config.monitored_logs : [],
+            log_scan_keywords: Array.isArray(config.log_scan_keywords) ? config.log_scan_keywords : [],
+            log_scan_range_minutes: config.log_scan_range_minutes ?? 5,
+            log_context_minutes: config.log_context_minutes ?? 30,
         };
     } catch (error) {
         console.error(`Error fetching config for agent ${agentId}:`, error);
@@ -160,16 +125,9 @@ export async function fetchAgentConfig(agentId) {
     }
 }
 
-/**
- * Saves general configuration settings for a specific agent.
- * @param {string} agentId - The ID of the agent.
- * @param {object} configData - The configuration data to save.
- * @returns {Promise<object>} - A promise that resolves to the API response.
- * @throws {Error} - Throws an error if the save operation fails.
- */
 export async function saveAgentGeneralConfig(agentId, configData) {
     const endpoint = `/api/agents/${encodeURIComponent(agentId)}/config/general`;
-    console.debug(`Saving general config for agent ${agentId}:`, configData); // Debug log
+    console.debug(`Saving general config for agent ${agentId}:`, configData);
     try {
         const response = await fetch(endpoint, {
             method: 'POST',
@@ -188,17 +146,9 @@ export async function saveAgentGeneralConfig(agentId, configData) {
     }
 }
 
-/**
- * Saves the list of monitored namespaces for a specific K8s agent.
- * @param {string} agentId - The ID of the K8s agent.
- * @param {string[]} namespaces - An array of namespace names to monitor.
- * @returns {Promise<object>} - A promise that resolves to the API response.
- * @throws {Error} - Throws an error if the save operation fails.
- */
 export async function saveAgentMonitoredNamespaces(agentId, namespaces) {
-    // This function remains specific to K8s agents
     const endpoint = `/api/agents/${encodeURIComponent(agentId)}/config/namespaces`;
-     console.debug(`Saving namespaces for agent ${agentId}:`, namespaces); // Debug log
+     console.debug(`Saving namespaces for agent ${agentId}:`, namespaces);
     try {
         const response = await fetch(endpoint, {
             method: 'POST',
@@ -217,42 +167,32 @@ export async function saveAgentMonitoredNamespaces(agentId, namespaces) {
     }
 }
 
-// --- NEW: Fetch distinct environment names ---
-/**
- * Fetches a list of distinct environment names from active agents.
- * @returns {Promise<string[]>} - A promise that resolves to an array of unique environment names.
- * @throws {Error} - Throws an error if the fetch or API call fails.
- */
+
 export async function fetchEnvironments() {
     try {
-        console.debug("Fetching distinct environment names..."); // Debug log
-        // We can reuse the agent status endpoint and extract names client-side
+        console.debug("Fetching distinct environment names...");
         const data = await fetchAgentStatus();
         const agents = data.active_agents || [];
         const environmentNames = [...new Set(agents.map(agent => agent.environment_name).filter(Boolean))];
-        environmentNames.sort(); // Sort alphabetically
+        environmentNames.sort();
         console.debug("Distinct environments found:", environmentNames);
         return environmentNames;
     } catch (error) {
         console.error('Error fetching distinct environments:', error);
-        // Return empty array on error to avoid breaking UI
         return [];
     }
 }
 
 
-// --- Global Config APIs (No changes needed in structure) ---
 
 export async function fetchTelegramConfigApi() {
     try {
-        console.debug("Fetching Telegram config..."); // Debug log
-        const response = await fetch('/api/config/telegram'); // Uses GET implicitly
+        console.debug("Fetching Telegram config...");
+        const response = await fetch('/api/config/telegram');
         if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
         const config = await response.json();
         if (config.error) { throw new Error(`API Error: ${config.error}`); }
-        // Ensure boolean conversion
         config.enable_telegram_alerts = config.enable_telegram_alerts === true || config.enable_telegram_alerts === 'true';
-        // Backend should return 'has_token' based on ENV var
         return config;
     } catch (error) {
         console.error('Lỗi khi lấy cấu hình Telegram qua API:', error);
@@ -262,7 +202,7 @@ export async function fetchTelegramConfigApi() {
 
 export async function saveTelegramConfigApi(configData) {
     try {
-        console.debug("Saving Telegram config:", { ...configData, telegram_bot_token: '********' }); // Debug log
+        console.debug("Saving Telegram config:", { ...configData, telegram_bot_token: '********' });
         const response = await fetch('/api/config/telegram', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -280,16 +220,14 @@ export async function saveTelegramConfigApi(configData) {
 
 export async function fetchAiConfigApi() {
      try {
-         console.debug("Fetching AI config..."); // Debug log
-         const response = await fetch('/api/config/ai'); // Uses GET implicitly
+         console.debug("Fetching AI config...");
+         const response = await fetch('/api/config/ai');
          if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
          const config = await response.json();
          if (config.error) { throw new Error(`API Error: ${config.error}`); }
-         // Ensure boolean conversion and defaults
          config.enable_ai_analysis = config.enable_ai_analysis === true || config.enable_ai_analysis === 'true';
          config.ai_provider = config.ai_provider || 'none';
          config.ai_model_identifier = config.ai_model_identifier || '';
-          // Backend should return 'has_api_key' based on ENV var
          return config;
      } catch (error) {
          console.error('Lỗi khi lấy cấu hình AI qua API:', error);
@@ -299,7 +237,7 @@ export async function fetchAiConfigApi() {
 
 export async function saveAiConfigApi(configData) {
     try {
-        console.debug("Saving AI config:", { ...configData, ai_api_key: '********' }); // Debug log
+        console.debug("Saving AI config:", { ...configData, ai_api_key: '********' });
         const response = await fetch('/api/config/ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -316,11 +254,10 @@ export async function saveAiConfigApi(configData) {
 }
 
 
-// --- User Management APIs (No changes needed) ---
 
 export async function fetchUsers() {
     try {
-        console.debug("Fetching users..."); // Debug log
+        console.debug("Fetching users...");
         const response = await fetch('/api/users');
         if (!response.ok) {
             if (response.status === 403) {
@@ -341,7 +278,7 @@ export async function fetchUsers() {
 
 export async function createUser(userData) {
     try {
-        console.debug("Creating user:", { ...userData, password: '***' }); // Debug log
+        console.debug("Creating user:", { ...userData, password: '***' });
         const response = await fetch('/api/users', {
             method: 'POST',
             headers: {
@@ -363,7 +300,7 @@ export async function createUser(userData) {
 
 export async function updateUser(userId, userData) {
     try {
-        console.debug(`Updating user ${userId}:`, userData); // Debug log
+        console.debug(`Updating user ${userId}:`, userData);
         const response = await fetch(`/api/users/${userId}`, {
             method: 'PUT',
             headers: {
@@ -382,6 +319,3 @@ export async function updateUser(userId, userData) {
         throw error;
     }
 }
-
-// --- Cluster Info API (Removed as Portal should get info via Agent Status) ---
-// export async function fetchClusterInfo() { ... } // Removed

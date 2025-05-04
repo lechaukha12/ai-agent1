@@ -1,29 +1,23 @@
-// portal/static/js/ui.js
-
-// --- DOM Element References (Assume they exist as defined in main.js) ---
 const loadingSpinner = document.getElementById('loading-spinner');
 const loadingOverlay = document.getElementById('loading-overlay');
 const sidebarItems = document.querySelectorAll('.sidebar-item');
-// contentSections will be queried inside setActiveSection
 
-// Incident Modal Elements
 const incidentModal = document.getElementById('incident-modal');
 const modalTimestamp = document.getElementById('modal-timestamp');
 const modalSeverity = document.getElementById('modal-severity');
-const modalEnvironmentName = document.getElementById('modal-environment-name'); // New
-const modalEnvironmentType = document.getElementById('modal-environment-type'); // New
-const modalResourceName = document.getElementById('modal-resource-name');       // New
-const modalResourceType = document.getElementById('modal-resource-type');       // New
+const modalEnvironmentName = document.getElementById('modal-environment-name');
+const modalEnvironmentType = document.getElementById('modal-environment-type');
+const modalResourceName = document.getElementById('modal-resource-name');
+const modalResourceType = document.getElementById('modal-resource-type');
 const modalInitialReasons = document.getElementById('modal-initial-reasons');
 const modalSummary = document.getElementById('modal-summary');
 const modalRootCause = document.getElementById('modal-root-cause');
 const modalTroubleshootingSteps = document.getElementById('modal-troubleshooting-steps');
 const modalSampleLogs = document.getElementById('modal-sample-logs');
-const modalEnvironmentContext = document.getElementById('modal-environment-context'); // Renamed ID
+const modalEnvironmentContext = document.getElementById('modal-environment-context');
 const modalInputPrompt = document.getElementById('modal-input-prompt');
 const modalRawAiResponse = document.getElementById('modal-raw-ai-response');
 
-// User Management Elements
 const usersTableBody = document.getElementById('users-table-body');
 const usersListErrorElem = document.getElementById('users-list-error');
 const editUserModal = document.getElementById('edit-user-modal');
@@ -41,54 +35,61 @@ const createUserForm = document.getElementById('create-user-form');
 const createUserStatus = document.getElementById('create-user-status');
 const passwordMatchError = document.getElementById('password-match-error');
 
-// Agent Status/Config Elements
 const agentStatusTableBody = document.getElementById('agent-status-table-body');
 const agentStatusErrorElem = document.getElementById('agent-status-error');
-const configAgentK8sVersionSpan = document.getElementById('config-agent-k8s-version');
-const configAgentNodeCountSpan = document.getElementById('config-agent-node-count');
 const agentScanIntervalInput = document.getElementById('agent-scan-interval');
-const agentRestartThresholdInput = document.getElementById('agent-restart-threshold');
 const agentLokiScanLevelSelect = document.getElementById('agent-loki-scan-level');
-const configAgentOsInfoSpan = document.getElementById('config-agent-os-info'); // Placeholder for Linux/Win
-const k8sSpecificElements = document.querySelectorAll('.agent-k8s-only'); // Select K8s specific elements
-const linuxSpecificElements = document.querySelectorAll('.agent-linux-only'); // Select Linux specific elements (example)
-// Add selectors for other agent types if needed
 
-// Add Agent Modal Elements
+const agentEnvInfoLoading = document.getElementById('agent-env-info-loading');
+const agentEnvHostnameSpan = document.getElementById('agent-env-hostname');
+const agentEnvOsSpan = document.getElementById('agent-env-os');
+const agentEnvKernelSpan = document.getElementById('agent-env-kernel');
+const agentEnvUptimeSpan = document.getElementById('agent-env-uptime');
+const agentEnvK8sVersionSpan = document.getElementById('agent-env-k8s-version');
+const agentEnvNodeCountSpan = document.getElementById('agent-env-node-count');
+
+
+const agentRestartThresholdInput = document.getElementById('agent-restart-threshold');
+
+
+const agentCpuThresholdInput = document.getElementById('agent-cpu-threshold');
+const agentMemThresholdInput = document.getElementById('agent-mem-threshold');
+const agentDiskThresholdsTextarea = document.getElementById('agent-disk-thresholds');
+const agentMonitoredServicesTextarea = document.getElementById('agent-monitored-services');
+const agentMonitoredLogsTextarea = document.getElementById('agent-monitored-logs');
+const agentLogScanKeywordsTextarea = document.getElementById('agent-log-scan-keywords');
+const agentLogScanRangeInput = document.getElementById('agent-log-scan-range');
+const agentLogContextMinutesInput = document.getElementById('agent-log-context-minutes');
+
+
 const addAgentModal = document.getElementById('add-agent-modal');
 const addAgentModalCloseButton = document.getElementById('add-agent-modal-close-button');
 const addAgentModalUnderstandButton = document.getElementById('add-agent-modal-understand-button');
 
 
-// --- General UI Functions ---
 export function showLoading() {
     if (loadingOverlay) loadingOverlay.classList.remove('hidden');
-    // if (loadingSpinner) loadingSpinner.classList.remove('hidden'); // Spinner is inside overlay now
 }
 export function hideLoading() {
     if (loadingOverlay) loadingOverlay.classList.add('hidden');
-    // if (loadingSpinner) loadingSpinner.classList.add('hidden');
 }
 export function formatVietnameseDateTime(isoString) {
      if (!isoString) return 'N/A';
      try {
          const dateObj = new Date(isoString);
          if (isNaN(dateObj.getTime())) {
-             // Try parsing common alternative format if ISO fails
-             const altDate = new Date(isoString.replace(' ', 'T') + 'Z'); // Assuming UTC if no timezone
+             const altDate = new Date(isoString.replace(' ', 'T') + 'Z');
              if (isNaN(altDate.getTime())) {
                  throw new Error(`Invalid date: ${isoString}`);
              }
-             // Use the alternative object if valid
              Object.assign(dateObj, altDate);
          }
          const options = {
              day: '2-digit', month: '2-digit', year: 'numeric',
              hour: '2-digit', minute: '2-digit', second: '2-digit',
-             hour12: false, // Use 24-hour format
-             timeZone: 'Asia/Ho_Chi_Minh' // Explicitly set timezone for display
+             hour12: false,
+             timeZone: 'Asia/Ho_Chi_Minh'
          };
-         // Use Intl.DateTimeFormat for better locale handling
          return new Intl.DateTimeFormat('vi-VN', options).format(dateObj);
      } catch (e) {
          console.error("DEBUG: Error formatting date:", isoString, e);
@@ -98,19 +99,16 @@ export function formatVietnameseDateTime(isoString) {
 export function setText(element, text, isHtml = false) {
     if (element) {
         const na_html = '<i class="text-gray-400">N/A</i>';
-        // Treat empty string as N/A as well
         const content = (text === null || text === undefined || String(text).trim() === '') ? na_html : text;
          if (isHtml) {
              element.innerHTML = content;
          } else {
              if (content === na_html) {
-                 element.innerHTML = na_html; // Use innerHTML for the italic N/A
+                 element.innerHTML = na_html;
              } else {
-                 element.textContent = text; // Use textContent for plain text
+                 element.textContent = String(text);
              }
          }
-    } else {
-        // console.warn("Attempted to set text on a null element.");
     }
 }
 export function getSeverityClass(severity) {
@@ -124,45 +122,38 @@ export function getSeverityClass(severity) {
 export function createSeverityBadge(severity) {
     const badgeClass = getSeverityClass(severity);
     const safeSeverity = document.createElement('span');
-    safeSeverity.textContent = severity || 'UNKNOWN'; // Ensure text content is safe
-    // Use template literal for cleaner HTML string construction
+    safeSeverity.textContent = severity || 'UNKNOWN';
     return `<span class="severity-badge ${badgeClass}">${safeSeverity.innerHTML}</span>`;
 }
 export function showStatusMessage(statusElement, message, type = 'info') {
     if (!statusElement) return;
     statusElement.textContent = message;
-    let baseClass = 'text-sm mr-4'; // Base class
+    let baseClass = 'text-sm mr-4';
     let typeClass = '';
     if (type === 'success') typeClass = ' text-green-600';
     else if (type === 'error') typeClass = ' text-red-600';
-    else typeClass = ' text-blue-600'; // Default to info
-    statusElement.className = baseClass + typeClass; // Combine classes
+    else typeClass = ' text-blue-600';
+    statusElement.className = baseClass + typeClass;
     statusElement.classList.remove('hidden');
 }
 export function hideStatusMessage(statusElement, delay = 3000) {
     if (!statusElement) return;
-    // Ensure the element exists before setting timeout
     setTimeout(() => {
-        if (statusElement) { // Check again inside timeout in case element is removed
+        if (statusElement) {
              statusElement.classList.add('hidden');
              statusElement.textContent = '';
         }
     }, delay);
 }
 
-// --- Incident Modal Functions ---
-/**
- * Opens the incident detail modal and populates it with data.
- * @param {object} incidentData - The incident data object from the API.
- */
+
 export function openModal(incidentData) {
     if (!incidentData || !incidentModal) {
         console.error(`DEBUG: Incident data not provided or modal element missing.`);
         return;
     }
-    console.debug("Opening incident modal with data:", incidentData); // Debug log
+    console.debug("Opening incident modal with data:", incidentData);
     try {
-        // Populate new fields
         setText(modalTimestamp, formatVietnameseDateTime(incidentData.timestamp));
         setText(modalSeverity, createSeverityBadge(incidentData.severity), true);
         setText(modalEnvironmentName, incidentData.environment_name);
@@ -172,58 +163,46 @@ export function openModal(incidentData) {
         setText(modalInitialReasons, incidentData.initial_reasons);
         setText(modalSummary, incidentData.summary);
 
-        // Populate AI and Context fields
         setText(modalRootCause, incidentData.root_cause);
         setText(modalTroubleshootingSteps, incidentData.troubleshooting_steps);
         setText(modalSampleLogs, incidentData.sample_logs);
-        setText(modalEnvironmentContext, incidentData.environment_context); // Use new context field
+        setText(modalEnvironmentContext, incidentData.environment_context);
         setText(modalInputPrompt, incidentData.input_prompt);
         setText(modalRawAiResponse, incidentData.raw_ai_response);
 
-        // Show/hide AI sections based on whether AI analysis was attempted/successful
-        // A simple check: if input_prompt exists, AI was likely attempted.
         const aiAttempted = !!incidentData.input_prompt;
         const aiSections = incidentModal.querySelectorAll('.ai-details');
         aiSections.forEach(section => {
             section.style.display = aiAttempted ? 'block' : 'none';
         });
 
-        // Show the modal
         incidentModal.classList.add('modal-visible');
-        document.body.style.overflow = 'hidden'; // Prevent background scrolling
+        document.body.style.overflow = 'hidden';
 
     } catch (error) {
         console.error("DEBUG: Error occurred inside openModal:", error);
-        alert("Lỗi hiển thị chi tiết sự cố."); // User-friendly error
+        alert("Lỗi hiển thị chi tiết sự cố.");
     }
 }
 export function closeModal() {
     if (incidentModal) {
         incidentModal.classList.remove('modal-visible');
     }
-    document.body.style.overflow = ''; // Restore background scrolling
+    document.body.style.overflow = '';
 }
 
-// --- Section Activation ---
-/**
- * Sets the active section in the UI and triggers data loading for it.
- * Waits for the next animation frame after making the section visible before loading data.
- * @param {string} targetId - The ID of the section to activate (e.g., 'dashboard').
- * @param {Function} loadSectionDataCallback - The function to call to load data for the section.
- */
+
 export function setActiveSection(targetId, loadSectionDataCallback) {
     console.debug(`Activating section: ${targetId}`);
-    const contentSectionsNodeList = document.querySelectorAll('.content-section'); // Get NodeList inside function
+    const contentSectionsNodeList = document.querySelectorAll('.content-section');
 
     let targetSectionFound = false;
-    let targetSectionElement = null; // Store the target element
+    let targetSectionElement = null;
 
-    // First, hide all sections and find the target section
     contentSectionsNodeList.forEach(section => {
         if (section.id === `${targetId}-content`) {
             targetSectionFound = true;
-            targetSectionElement = section; // Store the element
-            // Make the target section visible *immediately*
+            targetSectionElement = section;
             section.classList.remove('hidden');
             console.debug(`Section ${targetId}-content made visible.`);
         } else {
@@ -236,24 +215,21 @@ export function setActiveSection(targetId, loadSectionDataCallback) {
         const dashboardSection = document.getElementById('dashboard-content');
         if (dashboardSection) {
             dashboardSection.classList.remove('hidden');
-            targetId = 'dashboard'; // Update targetId for callback and sidebar
-            targetSectionElement = dashboardSection; // Update target element
+            targetId = 'dashboard';
+            targetSectionElement = dashboardSection;
         } else {
             console.error("Dashboard section not found either!");
-            return; // Exit if fallback also fails
+            return;
         }
     }
 
-    // Update sidebar active state
-    const sidebarItemsNodeList = document.querySelectorAll('.sidebar-item'); // Get NodeList inside function
+    const sidebarItemsNodeList = document.querySelectorAll('.sidebar-item');
     sidebarItemsNodeList.forEach(item => {
         item.classList.toggle('active', item.getAttribute('href') === `#${targetId}`);
     });
 
-    // Load data for the newly active section *after* the next animation frame
     if (typeof loadSectionDataCallback === 'function') {
         requestAnimationFrame(() => {
-            // Double check the target section is still the intended one and visible
             if (targetSectionElement && !targetSectionElement.classList.contains('hidden')) {
                 console.debug(`Calling loadSectionDataCallback for ${targetId} inside rAF`);
                 loadSectionDataCallback(targetId);
@@ -267,33 +243,25 @@ export function setActiveSection(targetId, loadSectionDataCallback) {
 }
 
 
-// --- Agent Monitoring UI ---
-/**
- * Renders the agent status table with updated columns.
- * @param {Array} agents - Array of agent objects from the API.
- * @param {Function} configureCallback - Callback for the configure button click. Receives (agentId, environmentName, environmentType, environmentInfo).
- * @param {string} currentUserRole - The role of the currently logged-in user.
- */
+
 export function renderAgentStatusTable(agents, configureCallback, currentUserRole) {
     if (!agentStatusTableBody || !agentStatusErrorElem) {
         console.warn("Agent status table elements not found.");
         return;
     }
-    agentStatusTableBody.innerHTML = ''; // Clear previous content
+    agentStatusTableBody.innerHTML = '';
     agentStatusErrorElem.classList.add('hidden');
 
     if (!agents || agents.length === 0) {
-        agentStatusTableBody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-gray-500">Không có agent nào đang hoạt động.</td></tr>`; // Updated colspan
+        agentStatusTableBody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-gray-500">Không có agent nào đang hoạt động.</td></tr>`;
         return;
     }
 
     agents.forEach(agent => {
         const row = document.createElement('tr');
-        // Store necessary data attributes for the configure callback
         row.setAttribute('data-agent-id', agent.agent_id);
         row.setAttribute('data-env-name', agent.environment_name || '');
         row.setAttribute('data-env-type', agent.environment_type || 'unknown');
-        // Store environment_info as a JSON string for easy retrieval
         try {
             row.setAttribute('data-env-info', JSON.stringify(agent.environment_info || {}));
         } catch (e) {
@@ -304,20 +272,17 @@ export function renderAgentStatusTable(agents, configureCallback, currentUserRol
 
         const createCell = (content, isHtml = false, cssClass = null) => {
             const cell = document.createElement('td');
-            // Base classes + optional class
             cell.className = `px-4 py-3 text-sm text-gray-700 align-middle whitespace-nowrap ${cssClass || ''}`;
             setText(cell, content, isHtml);
             return cell;
         };
 
-        // Populate new table structure
         row.appendChild(createCell(`${agent.environment_name || 'N/A'} / ${agent.agent_id || 'N/A'}`));
-        row.appendChild(createCell(agent.environment_type || 'unknown')); // Display environment type
-        row.appendChild(createCell(`<span class="severity-badge severity-info">Active</span>`, true)); // Assuming all listed are active
+        row.appendChild(createCell(agent.environment_type || 'unknown'));
+        row.appendChild(createCell(`<span class="severity-badge severity-info">Active</span>`, true));
         row.appendChild(createCell(formatVietnameseDateTime(agent.last_seen_timestamp)));
         row.appendChild(createCell(agent.agent_version || 'N/A'));
 
-        // Action Cell with Configure Button (conditionally shown)
         const actionCell = document.createElement('td');
         actionCell.className = 'px-4 py-3 text-sm text-gray-700 align-middle';
         const actionContainer = document.createElement('div');
@@ -335,18 +300,17 @@ export function renderAgentStatusTable(agents, configureCallback, currentUserRol
                     } catch (e) {
                         console.error(`Failed to parse env_info for agent ${agent.agent_id}`, e);
                     }
-                    // Pass all necessary info to the callback
                     configureCallback(
                         row.getAttribute('data-agent-id'),
                         row.getAttribute('data-env-name'),
                         row.getAttribute('data-env-type'),
-                        envInfo // Pass the parsed environment info object
+                        envInfo
                     );
                 }
             };
             actionContainer.appendChild(configButton);
         } else {
-             setText(actionContainer, '<i class="text-gray-400">N/A</i>', true); // Show N/A for non-admins
+             setText(actionContainer, '<i class="text-gray-400">N/A</i>', true);
         }
         actionCell.appendChild(actionContainer);
         row.appendChild(actionCell);
@@ -356,127 +320,173 @@ export function renderAgentStatusTable(agents, configureCallback, currentUserRol
 }
 
 export function showAgentStatusError(message) {
-    if (agentStatusTableBody) agentStatusTableBody.innerHTML = ''; // Clear table on error
+    if (agentStatusTableBody) agentStatusTableBody.innerHTML = '';
     if (agentStatusErrorElem) {
         setText(agentStatusErrorElem, message || 'Lỗi tải trạng thái agent.');
         agentStatusErrorElem.classList.remove('hidden');
     }
 }
-/**
- * Populates the agent configuration form with fetched data.
- * @param {object} agentConfig - Configuration object fetched from the API.
- * @param {string} environmentName - The name of the environment.
- * @param {string} environmentType - The type of the environment (e.g., 'kubernetes', 'linux').
- * @param {object} environmentInfo - Additional info about the environment.
- */
+
+function formatUptime(seconds) {
+    if (seconds === null || seconds === undefined || isNaN(seconds)) return 'N/A';
+    seconds = Number(seconds);
+    const d = Math.floor(seconds / (3600*24));
+    const h = Math.floor(seconds % (3600*24) / 3600);
+    const m = Math.floor(seconds % 3600 / 60);
+    const s = Math.floor(seconds % 60);
+
+    const dDisplay = d > 0 ? d + (d === 1 ? " day, " : " days, ") : "";
+    const hDisplay = h > 0 ? h + (h === 1 ? " hour, " : " hours, ") : "";
+    const mDisplay = m > 0 ? m + (m === 1 ? " minute, " : " minutes, ") : "";
+    const sDisplay = s + (s === 1 ? " second" : " seconds");
+
+    // Show more detail for shorter uptimes
+    if (d > 0) return dDisplay + hDisplay.replace(", ", "");
+    if (h > 0) return hDisplay + mDisplay.replace(", ", "");
+    if (m > 0) return mDisplay + sDisplay;
+    return sDisplay;
+}
+
 export function populateAgentConfigForm(agentConfig, environmentName, environmentType, environmentInfo) {
-    // Get references inside the function to ensure elements exist
     const configAgentEnvNameSpan = document.getElementById('config-agent-env-name');
     const configAgentEnvTypeSpan = document.getElementById('config-agent-env-type');
-    const agentScanIntervalInput = document.getElementById('agent-scan-interval');
-    const agentLokiScanLevelSelect = document.getElementById('agent-loki-scan-level');
-    const configAgentK8sVersionSpan = document.getElementById('config-agent-k8s-version');
-    const configAgentNodeCountSpan = document.getElementById('config-agent-node-count');
-    const agentRestartThresholdInput = document.getElementById('agent-restart-threshold');
-    const configAgentOsInfoSpan = document.getElementById('config-agent-os-info');
 
-    // Update Title
-    // setText(configAgentIdSpan, agentConfig.agentId || 'N/A'); // agentId already set in main.js
     setText(configAgentEnvNameSpan, environmentName || 'N/A');
     setText(configAgentEnvTypeSpan, environmentType || 'unknown');
 
-    // Populate General Settings
+    if (agentEnvInfoLoading) agentEnvInfoLoading.classList.add('hidden');
+    document.querySelectorAll('.agent-env-info-item').forEach(el => el.classList.add('hidden'));
+
+    if (environmentType === 'kubernetes') {
+        const k8sInfo = environmentInfo?.kubernetes_info || {};
+        setText(agentEnvK8sVersionSpan, k8sInfo.k8s_version);
+        setText(agentEnvNodeCountSpan, k8sInfo.node_count !== undefined ? String(k8sInfo.node_count) : null);
+        if (agentEnvK8sVersionSpan?.parentElement) agentEnvK8sVersionSpan.parentElement.classList.remove('hidden');
+        if (agentEnvNodeCountSpan?.parentElement) agentEnvNodeCountSpan.parentElement.classList.remove('hidden');
+    } else if (environmentType === 'linux') {
+        const sysInfo = environmentInfo || {};
+        setText(agentEnvHostnameSpan, sysInfo.hostname);
+        setText(agentEnvOsSpan, `${sysInfo.os_name || ''} ${sysInfo.os_release || ''}`);
+        setText(agentEnvKernelSpan, sysInfo.kernel_version);
+        setText(agentEnvUptimeSpan, formatUptime(sysInfo.uptime_seconds));
+        if (agentEnvHostnameSpan?.parentElement) agentEnvHostnameSpan.parentElement.classList.remove('hidden');
+        if (agentEnvOsSpan?.parentElement) agentEnvOsSpan.parentElement.classList.remove('hidden');
+        if (agentEnvKernelSpan?.parentElement) agentEnvKernelSpan.parentElement.classList.remove('hidden');
+        if (agentEnvUptimeSpan?.parentElement) agentEnvUptimeSpan.parentElement.classList.remove('hidden');
+    }
+
     if (agentScanIntervalInput) agentScanIntervalInput.value = agentConfig.scan_interval_seconds ?? 30;
     if (agentLokiScanLevelSelect) agentLokiScanLevelSelect.value = agentConfig.loki_scan_min_level ?? 'INFO';
 
-    // Populate K8s Specific Settings (if applicable)
-    const k8sInfo = environmentInfo?.kubernetes_info || {}; // Get K8s info if present
-    setText(configAgentK8sVersionSpan, k8sInfo.k8s_version || 'N/A');
-    setText(configAgentNodeCountSpan, k8sInfo.node_count !== undefined ? String(k8sInfo.node_count) : 'N/A');
+
     if (agentRestartThresholdInput) agentRestartThresholdInput.value = agentConfig.restart_count_threshold ?? 5;
 
-    // Populate Linux Specific Settings (Example - if applicable)
-    const osInfo = environmentInfo?.os_info || {}; // Assuming OS info might be here for Linux
-    setText(configAgentOsInfoSpan, osInfo.pretty_name || 'N/A'); // Example field
 
-    // Populate other agent-type specific fields as needed
+    if (agentCpuThresholdInput) agentCpuThresholdInput.value = agentConfig.cpu_threshold_percent ?? 90.0;
+    if (agentMemThresholdInput) agentMemThresholdInput.value = agentConfig.mem_threshold_percent ?? 90.0;
+    if (agentDiskThresholdsTextarea) {
+        try {
+            agentDiskThresholdsTextarea.value = JSON.stringify(agentConfig.disk_thresholds || {'/': 90.0}, null, 2);
+        } catch (e) {
+            agentDiskThresholdsTextarea.value = '{"/": 90.0}';
+            console.error("Error stringifying disk_thresholds", e);
+        }
+    }
+    if (agentMonitoredServicesTextarea) {
+        agentMonitoredServicesTextarea.value = (agentConfig.monitored_services || []).join('\n');
+    }
+    if (agentMonitoredLogsTextarea) {
+         try {
+            agentMonitoredLogsTextarea.value = JSON.stringify(agentConfig.monitored_logs || [], null, 2);
+        } catch (e) {
+            agentMonitoredLogsTextarea.value = '[]';
+            console.error("Error stringifying monitored_logs", e);
+        }
+    }
+    if (agentLogScanKeywordsTextarea) {
+        agentLogScanKeywordsTextarea.value = (agentConfig.log_scan_keywords || []).join(', ');
+    }
+    if (agentLogScanRangeInput) agentLogScanRangeInput.value = agentConfig.log_scan_range_minutes ?? 5;
+    if (agentLogContextMinutesInput) agentLogContextMinutesInput.value = agentConfig.log_context_minutes ?? 30;
 
-    // Update visibility based on type AFTER populating
+
     updateAgentConfigVisibility(environmentType);
 }
 
-/**
- * Shows/hides agent configuration sections based on the environment type.
- * @param {string} environmentType - The type of the agent's environment.
- */
 export function updateAgentConfigVisibility(environmentType = 'unknown') {
     console.debug(`Updating config visibility for type: ${environmentType}`);
 
-    // --- Manage Tabs ---
     const allTabs = document.querySelectorAll('.agent-config-tab');
-    let firstVisibleTab = 'agent-general'; // Default visible tab
+    let firstVisibleTab = 'agent-general';
 
     allTabs.forEach(tab => {
         const tabType = tab.getAttribute('data-tab');
         let shouldShow = false;
 
         if (tabType === 'agent-general') {
-            shouldShow = true; // Always show general tab
-        } else if (tabType === 'agent-namespaces' && environmentType === 'kubernetes') {
             shouldShow = true;
-            // Make namespaces default for K8s if general is default (optional UX choice)
-            // firstVisibleTab = firstVisibleTab === 'agent-general' ? 'agent-namespaces' : firstVisibleTab;
-        } else if (tabType === 'agent-linux-specific' && environmentType === 'linux') {
+        } else if (tabType === 'agent-k8s' && environmentType === 'kubernetes') {
             shouldShow = true;
-            // firstVisibleTab = firstVisibleTab === 'agent-general' ? 'agent-linux-specific' : firstVisibleTab;
+            firstVisibleTab = 'agent-k8s';
+        } else if (tabType === 'agent-linux' && environmentType === 'linux') {
+            shouldShow = true;
+            firstVisibleTab = 'agent-linux';
+        } else if (tabType === 'agent-windows' && environmentType === 'windows') {
+            shouldShow = true;
+            firstVisibleTab = 'agent-windows';
+        } else if (tabType === 'agent-docker' && environmentType === 'docker') {
+            shouldShow = true;
+            firstVisibleTab = 'agent-docker';
         }
-        // Add more 'else if' conditions for other agent types and their tabs
 
         tab.classList.toggle('hidden', !shouldShow);
     });
 
-    // Activate the first relevant visible tab (or default to general)
     const tabsContainer = document.querySelector('nav[aria-label="Tabs"]');
     if (tabsContainer) {
-        // Find the first *visible* tab button to activate
-        const firstVisibleTabButton = tabsContainer.querySelector('.agent-config-tab:not(.hidden)');
-        if(firstVisibleTabButton) {
-            firstVisibleTab = firstVisibleTabButton.getAttribute('data-tab') || 'agent-general';
+        const firstVisibleTabButton = tabsContainer.querySelector(`.agent-config-tab[data-tab="${firstVisibleTab}"]`);
+        if(firstVisibleTabButton && !firstVisibleTabButton.classList.contains('hidden')) {
+             // Activate the determined first visible tab
+             allTabs.forEach(t => {
+                 const isTarget = t.getAttribute('data-tab') === firstVisibleTab;
+                 t.classList.toggle('border-indigo-500', isTarget);
+                 t.classList.toggle('text-indigo-600', isTarget);
+                 t.classList.toggle('border-transparent', !isTarget);
+                 t.classList.toggle('text-gray-500', !isTarget);
+                 t.classList.toggle('hover:text-gray-700', !isTarget);
+                 t.classList.toggle('hover:border-gray-300', !isTarget);
+             });
+        } else {
+             // Fallback to activate general if the determined first tab is somehow hidden
+             const generalTabButton = tabsContainer.querySelector('.agent-config-tab[data-tab="agent-general"]');
+             if (generalTabButton) {
+                 firstVisibleTab = 'agent-general';
+                 allTabs.forEach(t => {
+                     const isTarget = t.getAttribute('data-tab') === firstVisibleTab;
+                     t.classList.toggle('border-indigo-500', isTarget);
+                     t.classList.toggle('text-indigo-600', isTarget);
+                     t.classList.toggle('border-transparent', !isTarget);
+                     t.classList.toggle('text-gray-500', !isTarget);
+                     t.classList.toggle('hover:text-gray-700', !isTarget);
+                     t.classList.toggle('hover:border-gray-300', !isTarget);
+                 });
+             }
         }
-
-        allTabs.forEach(t => {
-             const isTarget = t.getAttribute('data-tab') === firstVisibleTab;
-             t.classList.toggle('border-indigo-500', isTarget);
-             t.classList.toggle('text-indigo-600', isTarget);
-             t.classList.toggle('border-transparent', !isTarget);
-             t.classList.toggle('text-gray-500', !isTarget);
-             t.classList.toggle('hover:text-gray-700', !isTarget);
-             t.classList.toggle('hover:border-gray-300', !isTarget);
-         });
     }
 
 
-    // --- Manage Tab Content and Fields ---
     const allContents = document.querySelectorAll('.agent-config-tab-content');
     allContents.forEach(content => {
         content.classList.toggle('hidden', content.id !== `${firstVisibleTab}-tab`);
     });
 
-    // Show/hide specific fields within the general tab or other tabs
-    const k8sSpecificElementsNodeList = document.querySelectorAll('.agent-k8s-only');
-    const linuxSpecificElementsNodeList = document.querySelectorAll('.agent-linux-only');
-
-    k8sSpecificElementsNodeList.forEach(el => el.classList.toggle('hidden', environmentType !== 'kubernetes'));
-    linuxSpecificElementsNodeList.forEach(el => el.classList.toggle('hidden', environmentType !== 'linux'));
-    // Add logic for other types...
 }
 
 
-// --- Add Agent Modal Functions ---
 export function openAddAgentModal() {
     if (!addAgentModal) return;
     addAgentModal.classList.remove('hidden');
-    addAgentModal.classList.add('flex'); // Use flex for centering
+    addAgentModal.classList.add('flex');
     document.body.style.overflow = 'hidden';
 }
 export function closeAddAgentModal() {
@@ -485,7 +495,6 @@ export function closeAddAgentModal() {
     addAgentModal.classList.remove('flex');
     document.body.style.overflow = '';
 }
-// Add event listeners for the Add Agent modal close buttons
 if (addAgentModalCloseButton) {
     addAgentModalCloseButton.addEventListener('click', closeAddAgentModal);
 }
@@ -493,7 +502,7 @@ if (addAgentModalUnderstandButton) {
     addAgentModalUnderstandButton.addEventListener('click', closeAddAgentModal);
 }
 
-// --- User Management UI (No changes needed from previous versions) ---
+
 export function renderUserTable(users, editUserCallback) {
     if (!usersTableBody) { console.error("User table body element not found."); return; }
     if (usersListErrorElem) usersListErrorElem.classList.add('hidden');
@@ -531,7 +540,7 @@ export function renderUserTable(users, editUserCallback) {
         editButton.onclick = (event) => {
             event.stopPropagation();
             if (typeof editUserCallback === 'function') {
-                editUserCallback(user); // Pass the full user object
+                editUserCallback(user);
             }
         };
         actionCell.appendChild(editButton);
@@ -595,29 +604,25 @@ export function populateEditUserModal(userData) {
     editRoleSelect.value = userData.role || 'user';
 }
 
-// --- NEW: Function to populate environment filter dropdowns ---
-/**
- * Populates the environment filter dropdowns.
- * @param {string[]} environments - Array of environment names.
- */
+
 export function populateEnvironmentFilter(environments) {
     const incidentFilter = document.getElementById('environment-filter');
     const dashboardFilter = document.getElementById('dashboard-environment-filter');
-    const filters = [incidentFilter, dashboardFilter].filter(Boolean); // Filter out null elements
+    const filters = [incidentFilter, dashboardFilter].filter(Boolean);
 
     if (filters.length === 0) return;
 
     filters.forEach(filterSelect => {
-        // Clear existing options except the first one ("Tất cả Môi trường")
+        const currentValue = filterSelect.value;
         while (filterSelect.options.length > 1) {
             filterSelect.remove(1);
         }
-        // Add new options
         environments.forEach(env => {
             const option = document.createElement('option');
             option.value = env;
             option.textContent = env;
             filterSelect.appendChild(option);
         });
+        filterSelect.value = currentValue;
     });
 }
