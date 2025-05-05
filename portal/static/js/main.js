@@ -1,8 +1,10 @@
+// portal/static/js/main.js
 import * as api from './api.js';
 import * as ui from './ui.js';
 import * as charts from './charts.js';
 import * as settings from './settings.js';
 
+// --- State Variables ---
 let currentIncidentPage = 1;
 let totalIncidentPages = 1;
 let currentResourceFilter = '';
@@ -15,16 +17,20 @@ let usersDataCache = {};
 let currentConfiguringAgentId = null;
 let currentUserRole = 'user';
 
+// --- DOM Element References ---
 const sidebarItems = document.querySelectorAll('.sidebar-item');
 const contentSections = document.querySelectorAll('.content-section');
 
+// Dashboard
 const totalIncidentsElem = document.getElementById('total-incidents');
 const totalGeminiCallsElem = document.getElementById('total-gemini-calls');
 const totalTelegramAlertsElem = document.getElementById('total-telegram-alerts');
 const timeRangeButtons = document.querySelectorAll('.time-range-btn');
 const dashboardEnvironmentFilter = document.getElementById('dashboard-environment-filter');
 const dashboardEnvTypeFilter = document.getElementById('dashboard-env-type-filter');
+const refreshDashboardButton = document.getElementById('refresh-dashboard-button');
 
+// Incidents
 const incidentsTableBody = document.getElementById('incidents-table-body');
 const resourceFilterInput = document.getElementById('resource-filter');
 const severityFilterSelect = document.getElementById('severity-filter');
@@ -37,19 +43,36 @@ const paginationInfo = document.getElementById('pagination-info');
 const prevPageButton = document.getElementById('prev-page');
 const nextPageButton = document.getElementById('next-page');
 
+// Settings
 const saveTelegramConfigButton = document.getElementById('save-telegram-config-button');
 const saveAiConfigButton = document.getElementById('save-ai-config-button');
 const enableAiToggle = document.getElementById('enable-ai-toggle');
+const aiProviderSelect = document.getElementById('ai-provider-select');
 
+// Modals
 const modalCloseButton = document.getElementById('modal-close-button');
 const incidentModalElement = document.getElementById('incident-modal');
+const editUserModal = document.getElementById('edit-user-modal');
+const editUserModalCloseButton = document.getElementById('edit-user-modal-close-button');
+const editUserForm = document.getElementById('edit-user-form');
+const editUserStatus = document.getElementById('edit-user-status');
+const saveUserChangesButton = document.getElementById('save-user-changes-button');
+const createUserModal = document.getElementById('create-user-modal');
+const createUserModalCloseButton = document.getElementById('create-user-modal-close-button');
+const createUserForm = document.getElementById('create-user-form');
+const createUserButton = document.getElementById('create-user-button');
+const createUserStatus = document.getElementById('create-user-status');
+const newPasswordInput = document.getElementById('new-password');
+const confirmPasswordInput = document.getElementById('confirm-password');
+const passwordMatchError = document.getElementById('password-match-error');
+const addAgentModal = document.getElementById('add-agent-modal');
 
+// Agent Management
 const agentContentSection = document.getElementById('agent-content');
 const agentStatusTableBody = document.getElementById('agent-status-table-body');
 const agentStatusErrorElem = document.getElementById('agent-status-error');
 const refreshAgentStatusButton = document.getElementById('refresh-agent-status-button');
 const addAgentButton = document.getElementById('add-agent-button');
-
 const agentConfigSection = document.getElementById('agent-config-section');
 const configAgentIdSpan = document.getElementById('config-agent-id');
 const configAgentEnvNameSpan = document.getElementById('config-agent-env-name');
@@ -64,29 +87,17 @@ const saveAgentK8sConfigButton = document.getElementById('save-agent-k8s-config-
 const saveAgentK8sConfigStatus = document.getElementById('save-agent-k8s-config-status');
 const saveAgentLinuxConfigButton = document.getElementById('save-agent-linux-config-button');
 const saveAgentLinuxConfigStatus = document.getElementById('save-agent-linux-config-status');
-const saveAgentLokiConfigButton = document.getElementById('save-agent-loki-config-button'); // New button for Loki
-const saveAgentLokiConfigStatus = document.getElementById('save-agent-loki-config-status'); // New status for Loki
+const saveAgentLokiConfigButton = document.getElementById('save-agent-loki-config-button');
+const saveAgentLokiConfigStatus = document.getElementById('save-agent-loki-config-status');
 const closeAgentConfigButton = document.getElementById('close-agent-config-button');
 
+// User Management
 const usersTableBody = document.getElementById('users-table-body');
 const usersListErrorElem = document.getElementById('users-list-error');
 const openCreateUserModalButton = document.getElementById('open-create-user-modal-button');
-const createUserModal = document.getElementById('create-user-modal');
-const createUserModalCloseButton = document.getElementById('create-user-modal-close-button');
-const createUserForm = document.getElementById('create-user-form');
-const createUserButton = document.getElementById('create-user-button');
-const createUserStatus = document.getElementById('create-user-status');
-const newPasswordInput = document.getElementById('new-password');
-const confirmPasswordInput = document.getElementById('confirm-password');
-const passwordMatchError = document.getElementById('password-match-error');
-const editUserModal = document.getElementById('edit-user-modal');
-const editUserModalCloseButton = document.getElementById('edit-user-modal-close-button');
-const editUserForm = document.getElementById('edit-user-form');
-const editUserStatus = document.getElementById('edit-user-status');
-const saveUserChangesButton = document.getElementById('save-user-changes-button');
 
-const addAgentModal = document.getElementById('add-agent-modal');
 
+// --- Data Loading Functions ---
 
 async function loadAgentStatus() {
     if (!agentStatusTableBody || !agentStatusErrorElem) {
@@ -325,7 +336,7 @@ async function loadIncidentsData(forceReload = false) {
                 incidentsDataCache[incident.id] = incident;
                 const row = document.createElement('tr');
                 row.setAttribute('data-incident-id', incident.id);
-                row.classList.add('cursor-pointer', 'hover:bg-gray-100');
+                row.classList.add('cursor-pointer', 'hover:bg-gray-100', 'transition-colors', 'duration-150');
 
                 row.addEventListener('click', (event) => {
                     const clickedRow = event.currentTarget;
@@ -343,25 +354,37 @@ async function loadIncidentsData(forceReload = false) {
                 else if (severityUpper === 'ERROR') row.classList.add('bg-orange-50');
                 else if (severityUpper === 'WARNING') row.classList.add('bg-yellow-50');
 
-                const createCell = (content, isHtml = false, allowWrap = false, cssClass = null) => {
+                // --- Sử dụng hàm createCell đã cập nhật ---
+                const createCell = (content, isHtml = false, cssClass = null, maxLength = null) => {
                     const cell = document.createElement('td');
-                    cell.className = `px-4 py-3 text-sm text-gray-700 align-top ${cssClass || ''}`;
-                    ui.setText(cell, content, isHtml);
-                    if (!isHtml && typeof content === 'string') { cell.title = content; }
-                    cell.classList.toggle('whitespace-normal', allowWrap);
-                    cell.classList.toggle('whitespace-nowrap', !allowWrap);
-                    cell.classList.toggle('overflow-hidden', !allowWrap);
-                    cell.classList.toggle('text-ellipsis', !allowWrap);
+                    // Thêm padding và căn giữa dọc, thêm class để kiểm soát overflow
+                    cell.className = `px-4 py-2 text-sm text-gray-700 align-middle ${cssClass || ''} ${maxLength ? 'whitespace-nowrap overflow-hidden text-ellipsis' : 'whitespace-nowrap'}`;
+                    // Đặt max-width nếu có maxLength để ellipsis hoạt động
+                    if (maxLength) {
+                        cell.style.maxWidth = `${maxLength * 0.6}ch`; // Ước lượng độ rộng dựa trên số ký tự (cần tinh chỉnh)
+                        // Hoặc đặt một giá trị cố định: cell.style.maxWidth = '200px';
+                    }
+
+                    if (maxLength && typeof content === 'string' && content.length > maxLength) {
+                        cell.textContent = content.substring(0, maxLength) + '...';
+                        cell.title = content; // Tooltip luôn hiển thị nội dung đầy đủ
+                    } else {
+                        ui.setText(cell, content, isHtml);
+                        if (!isHtml && typeof content === 'string') { cell.title = content; }
+                    }
                     return cell;
                 };
+                // ---------------------------------------
 
                 row.appendChild(createCell(ui.formatVietnameseDateTime(incident.timestamp)));
                 row.appendChild(createCell(incident.environment_name));
                 row.appendChild(createCell(incident.environment_type));
-                row.appendChild(createCell(incident.resource_name));
+                // Rút gọn Tài nguyên nếu quá dài
+                row.appendChild(createCell(incident.resource_name, false, null, 50)); // Giới hạn 50 ký tự
                 row.appendChild(createCell(ui.createSeverityBadge(incident.severity), true));
-                row.appendChild(createCell(incident.summary, false, true));
-                row.appendChild(createCell(incident.initial_reasons, false, true));
+                // Rút gọn Summary và Initial Reasons với giới hạn ngắn hơn
+                row.appendChild(createCell(incident.summary, false, null, 60)); // Giới hạn 60 ký tự
+                row.appendChild(createCell(incident.initial_reasons, false, null, 70)); // Giới hạn 70 ký tự
                 incidentsTableBody.appendChild(row);
             });
         }
@@ -395,7 +418,7 @@ async function handleConfigureAgentClick(agentId, environmentName, environmentTy
 
     currentConfiguringAgentId = agentId;
     ui.showLoading();
-    const statuses = [saveAgentGeneralConfigStatus, saveAgentK8sConfigStatus, saveAgentLinuxConfigStatus, saveAgentLokiConfigStatus]; // Add Loki status
+    const statuses = [saveAgentGeneralConfigStatus, saveAgentK8sConfigStatus, saveAgentLinuxConfigStatus, saveAgentLokiConfigStatus];
     statuses.forEach(el => { if (el) el.classList.add('hidden'); });
 
     ui.setText(configAgentIdSpan, agentId);
@@ -505,7 +528,7 @@ async function handleSaveAgentGeneralConfig() {
     let configData = {};
     try {
         const scanIntervalInput = document.getElementById('agent-scan-interval');
-        const scanLevelSelect = document.getElementById('agent-loki-scan-level'); // Vẫn lấy nhưng có thể không gửi
+        const scanLevelSelect = document.getElementById('agent-loki-scan-level');
 
         const scanInterval = parseInt(scanIntervalInput?.value ?? '0');
         if (isNaN(scanInterval) || scanInterval < 10) {
@@ -513,7 +536,6 @@ async function handleSaveAgentGeneralConfig() {
         }
         configData.scan_interval_seconds = scanInterval;
 
-        // Chỉ gửi loki_scan_min_level nếu không phải là Loki Agent
         const currentEnvType = document.getElementById('config-agent-env-type')?.textContent;
         if (currentEnvType !== 'loki_source' && scanLevelSelect) {
             configData.loki_scan_min_level = scanLevelSelect.value ?? 'INFO';
@@ -567,9 +589,8 @@ async function handleSaveAgentK8sConfig() {
         }
         k8sSpecificConfig.restart_count_threshold = restartThreshold;
 
-        // Gửi cả config K8s và namespaces
         const nsPromise = api.saveAgentMonitoredNamespaces(currentConfiguringAgentId, selectedNamespaces);
-        const generalPromise = api.saveAgentGeneralConfig(currentConfiguringAgentId, k8sSpecificConfig); // Gửi ngưỡng restart qua endpoint general
+        const generalPromise = api.saveAgentGeneralConfig(currentConfiguringAgentId, k8sSpecificConfig);
 
         await Promise.all([nsPromise, generalPromise]);
 
@@ -649,7 +670,6 @@ async function handleSaveAgentLinuxConfig() {
         linuxConfigData.log_context_minutes = logContextMinutes;
 
 
-        // Gửi tất cả cấu hình Linux qua endpoint general
         await api.saveAgentGeneralConfig(currentConfiguringAgentId, linuxConfigData);
         ui.showStatusMessage(saveAgentLinuxConfigStatus, 'Đã lưu thành công!', 'success');
 
@@ -666,7 +686,7 @@ async function handleSaveAgentLinuxConfig() {
     }
 }
 
-// --- Thêm hàm xử lý lưu cấu hình Loki ---
+
 async function handleSaveAgentLokiConfig() {
     if (!currentConfiguringAgentId || !saveAgentLokiConfigButton || !saveAgentLokiConfigStatus) return;
 
@@ -700,24 +720,20 @@ async function handleSaveAgentLokiConfig() {
         lokiConfigData.log_scan_range_minutes = scanRange;
         lokiConfigData.loki_query_limit = queryLimit;
 
-        // Xử lý LogQL queries: Thử parse JSON array trước, nếu lỗi thì coi là list các query ngăn cách bởi newline
         let parsedQueries = [];
         if (logqlQueriesRaw.startsWith('[') && logqlQueriesRaw.endsWith(']')) {
             try {
                 parsedQueries = JSON.parse(logqlQueriesRaw);
                 if (!Array.isArray(parsedQueries)) throw new Error("Input không phải JSON array.");
-                // Validate thêm cấu trúc object bên trong nếu cần
                 parsedQueries = parsedQueries.filter(q => typeof q === 'object' && q !== null && q.query);
             } catch (e) {
-                // Nếu parse JSON lỗi, fallback về split theo newline
                 console.warn("Failed to parse LogQL queries as JSON, falling back to newline split:", e);
                 parsedQueries = logqlQueriesRaw.split('\n')
                                     .map(q => q.trim())
                                     .filter(Boolean)
-                                    .map(q => ({ query: q })); // Chuyển thành cấu trúc object đơn giản
+                                    .map(q => ({ query: q }));
             }
         } else {
-            // Nếu không phải JSON array, split theo newline
             parsedQueries = logqlQueriesRaw.split('\n')
                                 .map(q => q.trim())
                                 .filter(Boolean)
@@ -725,8 +741,7 @@ async function handleSaveAgentLokiConfig() {
         }
         lokiConfigData.logql_queries = parsedQueries;
 
-        // Gọi API để lưu (sử dụng hàm mới hoặc hàm general đã sửa đổi)
-        await api.saveAgentLokiConfig(currentConfiguringAgentId, lokiConfigData); // Hoặc saveAgentGeneralConfig nếu backend gộp chung
+        await api.saveAgentLokiConfig(currentConfiguringAgentId, lokiConfigData);
         ui.showStatusMessage(saveAgentLokiConfigStatus, 'Đã lưu thành công!', 'success');
 
     } catch (error) {
@@ -741,7 +756,7 @@ async function handleSaveAgentLokiConfig() {
         }
     }
 }
-// -------------------------------------
+
 
 
 function handleCloseAgentConfig() {
@@ -866,7 +881,7 @@ function applyRolePermissions() {
     document.querySelector('a[href="#settings"]')?.parentElement?.classList.toggle('hidden', !isAdmin);
     document.querySelector('a[href="#user-management"]')?.parentElement?.classList.toggle('hidden', !isAdmin);
 
-    [saveTelegramConfigButton, saveAiConfigButton, saveAgentGeneralConfigButton, saveAgentK8sConfigButton, saveAgentLinuxConfigButton, saveAgentLokiConfigButton, createUserButton, saveUserChangesButton] // Add Loki save button
+    [saveTelegramConfigButton, saveAiConfigButton, saveAgentGeneralConfigButton, saveAgentK8sConfigButton, saveAgentLinuxConfigButton, saveAgentLokiConfigButton, createUserButton, saveUserChangesButton]
         .forEach(btn => { if(btn) btn.disabled = !isAdmin; });
 
     if (openCreateUserModalButton) openCreateUserModalButton.disabled = !isAdmin;
@@ -955,11 +970,16 @@ document.addEventListener('DOMContentLoaded', async () => {
              select.addEventListener('change', loadDashboardData);
          }
      });
+     if(refreshDashboardButton) {
+         refreshDashboardButton.addEventListener('click', loadDashboardData);
+     }
 
 
     if (saveTelegramConfigButton) saveTelegramConfigButton.addEventListener('click', settings.saveTelegramSettings);
     if (saveAiConfigButton) saveAiConfigButton.addEventListener('click', settings.saveAiSettings);
     if (enableAiToggle) enableAiToggle.addEventListener('change', settings.handleAiToggleChange);
+    if (aiProviderSelect) aiProviderSelect.addEventListener('change', settings.handleAiProviderChange);
+
 
     if (agentConfigTabs) {
         agentConfigTabs.forEach(tab => {
@@ -972,7 +992,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (saveAgentGeneralConfigButton) saveAgentGeneralConfigButton.addEventListener('click', handleSaveAgentGeneralConfig);
     if (saveAgentK8sConfigButton) saveAgentK8sConfigButton.addEventListener('click', handleSaveAgentK8sConfig);
     if (saveAgentLinuxConfigButton) saveAgentLinuxConfigButton.addEventListener('click', handleSaveAgentLinuxConfig);
-    if (saveAgentLokiConfigButton) saveAgentLokiConfigButton.addEventListener('click', handleSaveAgentLokiConfig); // Add listener
+    if (saveAgentLokiConfigButton) saveAgentLokiConfigButton.addEventListener('click', handleSaveAgentLokiConfig);
     if (closeAgentConfigButton) closeAgentConfigButton.addEventListener('click', handleCloseAgentConfig);
     if (refreshAgentStatusButton) refreshAgentStatusButton.addEventListener('click', loadAgentStatus);
     if (addAgentButton) {
