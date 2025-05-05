@@ -1,4 +1,4 @@
-# ai-agent1/obsengine/app.py
+# -*- coding: utf-8 -*-
 import os
 import logging
 import sys
@@ -7,9 +7,8 @@ import threading
 import time
 import math
 import sqlite3
-from flask import Flask, request, jsonify, abort # Giữ lại import Flask cơ bản
+from flask import Flask, request, jsonify, abort
 from datetime import datetime, timezone, timedelta
-# Bỏ các import không cần thiết khác
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if APP_DIR not in sys.path:
@@ -65,6 +64,7 @@ except Exception as e:
 
 def get_initial_global_db_defaults():
      logger.debug("Getting initial GLOBAL DB defaults...")
+     # Thêm các default cho agent nếu cần (ví dụ: default loki_url)
      defaults = {
          'enable_telegram_alerts': str(getattr(obsengine_config, 'DEFAULT_ENABLE_TELEGRAM_ALERTS', False)).lower(),
          'telegram_chat_id': getattr(obsengine_config, 'DEFAULT_TELEGRAM_CHAT_ID', ''),
@@ -75,9 +75,25 @@ def get_initial_global_db_defaults():
          'prompt_template': getattr(obsengine_config, 'DEFAULT_PROMPT_TEMPLATE', "Default Prompt Missing"),
          'alert_severity_levels': getattr(obsengine_config, 'DEFAULT_ALERT_SEVERITY_LEVELS_STR', "WARNING,ERROR,CRITICAL"),
          'alert_cooldown_minutes': str(getattr(obsengine_config, 'DEFAULT_ALERT_COOLDOWN_MINUTES', 30)),
-         'default_monitored_namespaces': json.dumps(getattr(obsengine_config, 'DEFAULT_MONITORED_NAMESPACES_STR', "kube-system,default").split(','))
+         # Defaults cho K8s Agent
+         'default_monitored_namespaces': json.dumps(getattr(obsengine_config, 'DEFAULT_MONITORED_NAMESPACES_STR', "kube-system,default").split(',')),
+         'default_restart_count_threshold': str(getattr(obsengine_config, 'DEFAULT_RESTART_COUNT_THRESHOLD', 5)),
+         'default_loki_scan_min_level': getattr(obsengine_config, 'DEFAULT_LOKI_SCAN_MIN_LEVEL', 'INFO'),
+         # Defaults cho Linux Agent (ví dụ)
+         'default_cpu_threshold_percent': str(getattr(obsengine_config, 'DEFAULT_CPU_THRESHOLD', 90.0)),
+         'default_mem_threshold_percent': str(getattr(obsengine_config, 'DEFAULT_MEM_THRESHOLD', 90.0)),
+         'default_disk_thresholds': json.dumps(getattr(obsengine_config, 'DEFAULT_DISK_THRESHOLDS', {'/': 90.0})),
+         'default_monitored_services': json.dumps(getattr(obsengine_config, 'DEFAULT_MONITORED_SERVICES', [])),
+         'default_monitored_logs': json.dumps(getattr(obsengine_config, 'DEFAULT_MONITORED_LOGS', [])),
+         # Defaults cho Loki Agent (ví dụ)
+         'default_loki_url': getattr(obsengine_config, 'DEFAULT_LOKI_URL', ''),
+         'default_logql_queries': json.dumps(getattr(obsengine_config, 'DEFAULT_LOGQL_QUERIES', [])),
+         'default_log_scan_range_minutes': str(getattr(obsengine_config, 'DEFAULT_LOG_SCAN_RANGE_MINUTES', 5)),
+         'default_loki_query_limit': str(getattr(obsengine_config, 'DEFAULT_LOKI_QUERY_LIMIT', 500)),
+         # Default chung
+         'default_scan_interval_seconds': str(getattr(obsengine_config, 'DEFAULT_SCAN_INTERVAL_SECONDS', 60)),
      }
-     logger.debug(f"Initial GLOBAL DB defaults generated: {defaults}")
+     logger.debug(f"Initial GLOBAL DB defaults generated.")
      return defaults
 
 logger.info("Initializing database via db_manager.init_db...")
@@ -161,11 +177,11 @@ def collect_data():
     environment_type = data.get("environment_type")
     resource_type = data.get("resource_type")
     resource_name = data.get("resource_name")
-    collection_timestamp = data.get("collection_timestamp") # Giữ nguyên
+    collection_timestamp = data.get("collection_timestamp")
     initial_reasons = data.get("initial_reasons", [])
-    environment_context = data.get("environment_context") # Thay cho k8s_context
+    environment_context = data.get("environment_context")
     logs = data.get("logs", [])
-    environment_info = data.get("environment_info") # Thay cho cluster_info
+    environment_info = data.get("environment_info")
     agent_version = data.get("agent_version")
 
     if not agent_id:
@@ -195,114 +211,120 @@ def collect_data():
     except Exception as heartbeat_err:
         logger.error(f"Failed to update heartbeat/info for agent {agent_id}: {heartbeat_err}", exc_info=True)
 
-    try:
-        current_ai_config = obsengine_config.get_ai_config()
-        current_alert_config = obsengine_config.get_alert_config()
-        db_path_local = obsengine_config.get_db_path()
+    # --- Chỉ thực hiện phân tích và ghi incident nếu không phải là heartbeat ---
+    is_heartbeat = isinstance(initial_reasons, list) and len(initial_reasons) == 1 and initial_reasons[0] == "Heartbeat"
 
-        logger.debug(f"[{resource_identifier}] Performing analysis (Agent: {agent_id})...")
-        analysis_result, final_prompt, raw_response_text = ai_providers.perform_analysis(
-            logs=logs,
-            environment_context=environment_context,
-            initial_reasons_list=initial_reasons,
-            config=current_ai_config,
-            prompt_template=current_ai_config.get('prompt_template'),
-            environment_name=environment_name,
-            resource_name=resource_name,
-            environment_type=environment_type,
-            resource_type=resource_type
-        )
-        logger.debug(f"[{resource_identifier}] Analysis complete.")
+    if not is_heartbeat:
+        try:
+            current_ai_config = obsengine_config.get_ai_config()
+            current_alert_config = obsengine_config.get_alert_config()
+            db_path_local = obsengine_config.get_db_path()
 
-        severity = analysis_result.get("severity", "UNKNOWN").upper()
-        summary = analysis_result.get("summary", "N/A")
-        root_cause_raw = analysis_result.get("root_cause", "N/A")
-        steps_raw = analysis_result.get("troubleshooting_steps", "N/A")
-        root_cause = "\n".join(root_cause_raw) if isinstance(root_cause_raw, list) else str(root_cause_raw)
-        steps = "\n".join(steps_raw) if isinstance(steps_raw, list) else str(steps_raw)
-        logger.info(f"[{resource_identifier}] Analysis result: Severity={severity}")
+            logger.debug(f"[{resource_identifier}] Performing analysis (Agent: {agent_id})...")
+            analysis_result, final_prompt, raw_response_text = ai_providers.perform_analysis(
+                logs=logs,
+                environment_context=environment_context,
+                initial_reasons_list=initial_reasons,
+                config=current_ai_config,
+                prompt_template=current_ai_config.get('prompt_template'),
+                environment_name=environment_name,
+                resource_name=resource_name,
+                environment_type=environment_type,
+                resource_type=resource_type
+            )
+            logger.debug(f"[{resource_identifier}] Analysis complete.")
 
-        logger.debug(f"[{resource_identifier}] Recording incident...")
-        sample_logs_str = "\n".join([f"- {log.get('message', '')[:150]}" for log in logs[:5]]) if logs else "-"
-        initial_reasons_str = "; ".join(initial_reasons)
-        db_manager.record_incident(
-            db_path=db_path_local,
-            environment_name=environment_name,
-            environment_type=environment_type,
-            resource_type=resource_type,
-            resource_name=resource_name,
-            severity=severity,
-            summary=summary,
-            initial_reasons=initial_reasons_str,
-            environment_context=environment_context,
-            sample_logs=sample_logs_str,
-            input_prompt=final_prompt,
-            raw_ai_response=raw_response_text,
-            root_cause=root_cause,
-            troubleshooting_steps=steps
-        )
-        logger.debug(f"[{resource_identifier}] Incident recorded.")
+            severity = analysis_result.get("severity", "UNKNOWN").upper()
+            summary = analysis_result.get("summary", "N/A")
+            root_cause_raw = analysis_result.get("root_cause", "N/A")
+            steps_raw = analysis_result.get("troubleshooting_steps", "N/A")
+            root_cause = "\n".join(root_cause_raw) if isinstance(root_cause_raw, list) else str(root_cause_raw)
+            steps = "\n".join(steps_raw) if isinstance(steps_raw, list) else str(steps_raw)
+            logger.info(f"[{resource_identifier}] Analysis result: Severity={severity}")
 
-        alert_levels = current_alert_config.get('alert_severity_levels', [])
-        cooldown_minutes = current_alert_config.get('alert_cooldown_minutes', 30)
-        logger.debug(f"[{resource_identifier}] Checking alert conditions (Severity: {severity}, Levels: {alert_levels})...")
+            logger.debug(f"[{resource_identifier}] Recording incident...")
+            sample_logs_str = "\n".join([f"- {log.get('message', '')[:150]}" for log in logs[:5]]) if logs else "-"
+            initial_reasons_str = "; ".join(map(str, initial_reasons)) if initial_reasons else "N/A"
+            db_manager.record_incident(
+                db_path=db_path_local,
+                environment_name=environment_name,
+                environment_type=environment_type,
+                resource_type=resource_type,
+                resource_name=resource_name,
+                severity=severity,
+                summary=summary,
+                initial_reasons=initial_reasons_str,
+                environment_context=environment_context,
+                sample_logs=sample_logs_str,
+                input_prompt=final_prompt,
+                raw_ai_response=raw_response_text,
+                root_cause=root_cause,
+                troubleshooting_steps=steps
+            )
+            logger.debug(f"[{resource_identifier}] Incident recorded.")
 
-        if severity in alert_levels:
-            logger.debug(f"[{resource_identifier}] Checking cooldown...")
-            if not db_manager.is_resource_in_cooldown(db_path_local, resource_identifier):
-                logger.info(f"[{resource_identifier}] Not in cooldown. Processing alert.")
-                if current_alert_config.get('enable_telegram_alerts'):
-                    bot_token = current_alert_config.get('telegram_bot_token')
-                    chat_id = current_alert_config.get('telegram_chat_id')
-                    if bot_token and chat_id:
-                        logger.debug(f"[{resource_identifier}] Sending Telegram alert...")
-                        alert_time_hcm = received_time.astimezone(getattr(notifier, 'HCM_TZ', timezone.utc))
-                        time_format = '%Y-%m-%d %H:%M:%S %Z'
-                        alert_data = {
-                            'resource_identifier': resource_identifier,
-                            'environment_name': environment_name,
-                            'resource_name': resource_name,
-                            'environment_type': environment_type,
-                            'resource_type': resource_type,
-                            'agent_id': agent_id,
-                            'severity': severity,
-                            'summary': summary,
-                            'root_cause': root_cause,
-                            'troubleshooting_steps': steps,
-                            'initial_reasons': initial_reasons_str,
-                            'alert_time': alert_time_hcm.strftime(time_format),
-                            'sample_logs': sample_logs_str
-                        }
-                        alert_sent = notifier.send_telegram_alert(
-                            bot_token, chat_id, alert_data, current_ai_config.get('enable_ai_analysis')
-                        )
-                        if alert_sent:
-                            logger.debug(f"[{resource_identifier}] Alert sent. Setting cooldown...")
+            alert_levels = current_alert_config.get('alert_severity_levels', [])
+            cooldown_minutes = current_alert_config.get('alert_cooldown_minutes', 30)
+            logger.debug(f"[{resource_identifier}] Checking alert conditions (Severity: {severity}, Levels: {alert_levels})...")
+
+            if severity in alert_levels:
+                logger.debug(f"[{resource_identifier}] Checking cooldown...")
+                if not db_manager.is_resource_in_cooldown(db_path_local, resource_identifier):
+                    logger.info(f"[{resource_identifier}] Not in cooldown. Processing alert.")
+                    if current_alert_config.get('enable_telegram_alerts'):
+                        bot_token = current_alert_config.get('telegram_bot_token')
+                        chat_id = current_alert_config.get('telegram_chat_id')
+                        if bot_token and chat_id:
+                            logger.debug(f"[{resource_identifier}] Sending Telegram alert...")
+                            alert_time_hcm = received_time.astimezone(getattr(notifier, 'HCM_TZ', timezone.utc))
+                            time_format = '%Y-%m-%d %H:%M:%S %Z'
+                            alert_data = {
+                                'resource_identifier': resource_identifier,
+                                'environment_name': environment_name,
+                                'resource_name': resource_name,
+                                'environment_type': environment_type,
+                                'resource_type': resource_type,
+                                'agent_id': agent_id,
+                                'severity': severity,
+                                'summary': summary,
+                                'root_cause': root_cause,
+                                'troubleshooting_steps': steps,
+                                'initial_reasons': initial_reasons_str,
+                                'alert_time': alert_time_hcm.strftime(time_format),
+                                'sample_logs': sample_logs_str
+                            }
+                            alert_sent = notifier.send_telegram_alert(
+                                bot_token, chat_id, alert_data, current_ai_config.get('enable_ai_analysis')
+                            )
+                            if alert_sent:
+                                logger.debug(f"[{resource_identifier}] Alert sent. Setting cooldown...")
+                                db_manager.set_resource_cooldown(db_path_local, resource_identifier, cooldown_minutes)
+                            else: logger.warning(f"[{resource_identifier}] Telegram alert sending failed, cooldown NOT set.")
+                        else:
+                            logger.warning(f"[{resource_identifier}] Telegram alerts enabled but token/chat_id missing. Setting cooldown anyway.")
                             db_manager.set_resource_cooldown(db_path_local, resource_identifier, cooldown_minutes)
-                        else: logger.warning(f"[{resource_identifier}] Telegram alert sending failed, cooldown NOT set.")
                     else:
-                        logger.warning(f"[{resource_identifier}] Telegram alerts enabled but token/chat_id missing. Setting cooldown anyway.")
+                        logger.info(f"[{resource_identifier}] Telegram alerts disabled. Setting cooldown.")
                         db_manager.set_resource_cooldown(db_path_local, resource_identifier, cooldown_minutes)
-                else:
-                    logger.info(f"[{resource_identifier}] Telegram alerts disabled. Setting cooldown.")
-                    db_manager.set_resource_cooldown(db_path_local, resource_identifier, cooldown_minutes)
-            else: logger.info(f"[{resource_identifier}] Resource is in cooldown. Alert processing skipped.")
-        else: logger.info(f"[{resource_identifier}] Severity does not meet alert threshold. No alert needed.")
+                else: logger.info(f"[{resource_identifier}] Resource is in cooldown. Alert processing skipped.")
+            else: logger.info(f"[{resource_identifier}] Severity does not meet alert threshold. No alert needed.")
 
-        logger.info(f"--- Successfully processed data for {resource_identifier} from Agent {agent_id} ---")
-        return jsonify({"message": f"Data processed successfully for {resource_identifier}"}), 200
+            logger.info(f"--- Successfully processed data for {resource_identifier} from Agent {agent_id} ---")
+            return jsonify({"message": f"Data processed successfully for {resource_identifier}"}), 200
 
-    except AttributeError as ae:
-        logger.error(f"--- AttributeError processing data for resource {resource_identifier} from Agent {agent_id}: {ae} ---", exc_info=True)
-        return jsonify({"error": f"Internal server error (AttributeError) processing data for {resource_identifier}"}), 500
-    except Exception as e:
-        logger.error(f"--- Error processing data for resource {resource_identifier} from Agent {agent_id}: {e} ---", exc_info=True)
-        return jsonify({"error": f"Internal server error processing data for {resource_identifier}"}), 500
+        except AttributeError as ae:
+            logger.error(f"--- AttributeError processing data for resource {resource_identifier} from Agent {agent_id}: {ae} ---", exc_info=True)
+            return jsonify({"error": f"Internal server error (AttributeError) processing data for {resource_identifier}"}), 500
+        except Exception as e:
+            logger.error(f"--- Error processing data for resource {resource_identifier} from Agent {agent_id}: {e} ---", exc_info=True)
+            return jsonify({"error": f"Internal server error processing data for {resource_identifier}"}), 500
+    else:
+        # Chỉ là heartbeat, không làm gì thêm
+        logger.info(f"--- Received heartbeat from Agent {agent_id} for {environment_name} ---")
+        return jsonify({"message": "Heartbeat received"}), 200
 
-# --- API Endpoints cho Portal (KHÔNG cần @login_required) ---
 
 @app.route('/api/agents/status', methods=['GET'])
-# @login_required # Bỏ decorator này
 def get_agent_status():
     logger.info("--- /api/agents/status endpoint hit ---")
     try:
@@ -315,7 +337,6 @@ def get_agent_status():
         return jsonify({"error": "Failed to retrieve agent status"}), 500
 
 @app.route('/api/incidents', methods=['GET'])
-# @login_required # Bỏ decorator này
 def get_incidents_api():
     logger.info("--- /api/incidents endpoint hit ---")
     try:
@@ -361,7 +382,6 @@ def get_incidents_api():
     except Exception as e: logger.error(f"Error in /api/incidents: {e}", exc_info=True); return jsonify({"error": "Failed to retrieve incidents"}), 500
 
 @app.route('/api/stats', methods=['GET'])
-# @login_required # Bỏ decorator này
 def get_stats_api():
     logger.info("--- /api/stats endpoint hit ---")
     try:
@@ -385,7 +405,6 @@ def get_stats_api():
             if env_filter: incident_where_clause += " AND environment_name = ?"; incident_params.append(env_filter)
             if env_type_filter: incident_where_clause += " AND environment_type = ?"; incident_params.append(env_type_filter)
 
-            # Lấy tổng incident từ bảng incidents đã lọc
             cursor.execute(f'SELECT COUNT(*) as count FROM incidents {incident_where_clause}', tuple(incident_params));
             total_incidents_filtered = cursor.fetchone()['count'] or 0
 
@@ -393,7 +412,7 @@ def get_stats_api():
             stats['totals'] = {
                 "model_calls": totals_calls_alerts['total_model_calls'] if totals_calls_alerts else 0,
                 "telegram_alerts": totals_calls_alerts['total_telegram_alerts'] if totals_calls_alerts else 0,
-                "incidents": total_incidents_filtered, # Sử dụng tổng đã lọc
+                "incidents": total_incidents_filtered,
             }
 
             today_start_utc = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0); today_end_utc = today_start_utc + timedelta(days=1) - timedelta(microseconds=1);
@@ -413,15 +432,19 @@ def get_stats_api():
     except Exception as e: logger.error(f"Error in /api/stats: {e}", exc_info=True); return jsonify({"error": "Failed to retrieve stats"}), 500
 
 @app.route('/api/config/all', methods=['GET'])
-# @login_required # Bỏ decorator này
 def get_all_config_api():
     logger.info("--- GET /api/config/all endpoint hit ---")
     try:
         current_config = db_manager.load_all_global_config(DB_PATH)
-        current_config['ai_api_key'] = obsengine_config._get_env_var("GEMINI_API_KEY", "")
-        current_config['telegram_bot_token'] = obsengine_config._get_env_var("TELEGRAM_BOT_TOKEN", "")
-        sensitive_keys_to_exclude = ['ai_api_key', 'telegram_bot_token']
-        safe_config = {k: v for k, v in current_config.items() if k not in sensitive_keys_to_exclude}
+        # Lấy key nhạy cảm từ env để biết chúng có được set không
+        has_ai_key = bool(obsengine_config._get_env_var("GEMINI_API_KEY"))
+        has_tg_token = bool(obsengine_config._get_env_var("TELEGRAM_BOT_TOKEN"))
+
+        # Không trả về giá trị key/token thực tế
+        safe_config = {k: v for k, v in current_config.items() if k not in ['ai_api_key', 'telegram_bot_token']}
+        safe_config['has_api_key'] = has_ai_key
+        safe_config['has_token'] = has_tg_token
+
         alert_levels_str = safe_config.get('alert_severity_levels')
         if alert_levels_str:
             safe_config['alert_severity_levels_str'] = alert_levels_str
@@ -448,7 +471,6 @@ def get_all_config_api():
         return jsonify({"error": "Failed to retrieve global configuration"}), 500
 
 @app.route('/api/namespaces', methods=['GET'])
-# @login_required # Bỏ decorator này
 def get_available_namespaces_api():
     logger.info("--- /api/namespaces endpoint hit (used for K8s agent config) ---");
     logger.info("Fetching available namespaces from DB cache.")
@@ -474,13 +496,8 @@ def get_available_namespaces_api():
             conn.close()
 
 @app.route('/api/config/ai', methods=['POST'])
-# @login_required # Bỏ decorator này
-# @admin_required # Quyền admin sẽ được kiểm tra ở Portal
 def save_global_ai_config_api():
-    # Lưu ý: API này nên có cơ chế bảo mật riêng nếu không dùng login session
-    # Ví dụ: API key, token bí mật... Tạm thời bỏ qua để đơn giản
     logger.info("--- POST /api/config/ai (Global) endpoint hit ---")
-    # if current_user.role != 'admin': return jsonify({"error": "Admin privileges required"}), 403 # Bỏ check này
     if not request.is_json: return jsonify({"error": "Request must be JSON"}), 400
     data = request.get_json(); logger.debug(f"Received global AI config data: {data}")
     config_to_save = {}; validation_errors = []; valid_providers = ['gemini', 'local', 'openai', 'groq', 'deepseek', 'none']
@@ -491,17 +508,16 @@ def save_global_ai_config_api():
     if provider not in valid_providers: validation_errors.append(f"Invalid AI provider: {provider}")
     else: config_to_save['ai_provider'] = provider
     model_id = data.get('ai_model_identifier', ''); config_to_save['ai_model_identifier'] = model_id.strip();
+    # Không lưu API key vào DB từ API này, chỉ quản lý qua ENV
+    # if 'ai_api_key' in data: logger.warning("API key provided via API, but it won't be saved to DB. Use ENV var.")
     if validation_errors: logger.error(f"Validation failed for global AI config: {validation_errors}"); return jsonify({"error": "Validation failed", "details": validation_errors}), 400
     success, message = db_manager.save_global_config(DB_PATH, config_to_save);
     if success: obsengine_config._last_config_refresh_time = 0; return jsonify({"message": message}), 200
     else: return jsonify({"error": message}), 500
 
 @app.route('/api/config/telegram', methods=['POST'])
-# @login_required # Bỏ decorator này
-# @admin_required # Quyền admin sẽ được kiểm tra ở Portal
 def save_global_telegram_config_api():
     logger.info("--- POST /api/config/telegram (Global) endpoint hit ---")
-    # if current_user.role != 'admin': return jsonify({"error": "Admin privileges required"}), 403 # Bỏ check này
     if not request.is_json: return jsonify({"error": "Request must be JSON"}), 400
     data = request.get_json(); logger.debug(f"Received global Telegram config data: {data}")
     config_to_save = {}; validation_errors = []
@@ -511,96 +527,178 @@ def save_global_telegram_config_api():
     chat_id = data.get('telegram_chat_id', '').strip();
     if not chat_id: validation_errors.append("Telegram Chat ID cannot be empty")
     else: config_to_save['telegram_chat_id'] = chat_id
+    # Không lưu Bot Token vào DB từ API này, chỉ quản lý qua ENV
+    # if 'telegram_bot_token' in data: logger.warning("Bot token provided via API, but it won't be saved to DB. Use ENV var.")
     if validation_errors: logger.error(f"Validation failed for global Telegram config: {validation_errors}"); return jsonify({"error": "Validation failed", "details": validation_errors}), 400
     success, message = db_manager.save_global_config(DB_PATH, config_to_save);
     if success: obsengine_config._last_config_refresh_time = 0; return jsonify({"message": message}), 200
     else: return jsonify({"error": message}), 500
 
+# --- Cập nhật API lấy config Agent ---
 @app.route('/api/agents/<agent_id>/config', methods=['GET'])
-# @login_required # Bỏ decorator này
 def get_agent_config_api(agent_id):
     logger.info(f"--- GET /api/agents/{agent_id}/config endpoint hit ---")
     if not agent_id: return jsonify({"error": "Agent ID is required"}), 400
     try:
         global_config = db_manager.load_all_global_config(DB_PATH)
         agent_overrides = db_manager.load_agent_config(DB_PATH, agent_id)
-        agent_info = db_manager.get_agent_info(DB_PATH, agent_id) # Lấy thông tin agent
+        agent_info = db_manager.get_agent_info(DB_PATH, agent_id)
+        agent_type = agent_info.get('environment_type', 'unknown') if agent_info else 'unknown'
 
-        # Lấy default từ global config
+        # Bắt đầu với default global
         merged_config = {
-            'scan_interval_seconds': int(global_config.get('default_scan_interval_seconds', 30)),
-            'restart_count_threshold': int(global_config.get('default_restart_count_threshold', 5)),
-            'loki_scan_min_level': global_config.get('default_loki_scan_min_level', 'INFO'),
-            'monitored_namespaces': json.loads(global_config.get('default_monitored_namespaces', '[]')),
+            'scan_interval_seconds': int(global_config.get('default_scan_interval_seconds', 60)),
+            'environment_type': agent_type,
+            'environment_info': agent_info.get('environment_info', {}) if agent_info else {}
         }
 
-        # Ghi đè bằng config của agent
+        # Thêm default theo loại agent
+        if agent_type == 'kubernetes':
+            merged_config['restart_count_threshold'] = int(global_config.get('default_restart_count_threshold', 5))
+            merged_config['loki_scan_min_level'] = global_config.get('default_loki_scan_min_level', 'INFO')
+            try: merged_config['monitored_namespaces'] = json.loads(global_config.get('default_monitored_namespaces', '[]'))
+            except json.JSONDecodeError: merged_config['monitored_namespaces'] = []
+        elif agent_type == 'linux':
+            merged_config['cpu_threshold_percent'] = float(global_config.get('default_cpu_threshold_percent', 90.0))
+            merged_config['mem_threshold_percent'] = float(global_config.get('default_mem_threshold_percent', 90.0))
+            try: merged_config['disk_thresholds'] = json.loads(global_config.get('default_disk_thresholds', '{}'))
+            except json.JSONDecodeError: merged_config['disk_thresholds'] = {}
+            try: merged_config['monitored_services'] = json.loads(global_config.get('default_monitored_services', '[]'))
+            except json.JSONDecodeError: merged_config['monitored_services'] = []
+            try: merged_config['monitored_logs'] = json.loads(global_config.get('default_monitored_logs', '[]'))
+            except json.JSONDecodeError: merged_config['monitored_logs'] = []
+            merged_config['log_scan_range_minutes'] = int(global_config.get('default_log_scan_range_minutes', 5)) # Dùng chung key với loki
+            merged_config['log_context_minutes'] = int(global_config.get('default_log_context_minutes', 30)) # Dùng chung key với loki
+        elif agent_type == 'loki_source':
+             merged_config['loki_url'] = global_config.get('default_loki_url', '')
+             try: merged_config['logql_queries'] = json.loads(global_config.get('default_logql_queries', '[]'))
+             except json.JSONDecodeError: merged_config['logql_queries'] = []
+             merged_config['log_scan_range_minutes'] = int(global_config.get('default_log_scan_range_minutes', 5))
+             merged_config['loki_query_limit'] = int(global_config.get('default_loki_query_limit', 500))
+
+        # Ghi đè bằng config cụ thể của agent
         for key, value in agent_overrides.items():
              try:
-                 if key in ['scan_interval_seconds', 'restart_count_threshold']:
+                 # Cố gắng parse các giá trị số và JSON
+                 if key in ['scan_interval_seconds', 'restart_count_threshold', 'log_scan_range_minutes', 'loki_query_limit', 'log_context_minutes']:
                      merged_config[key] = int(value)
-                 elif key == 'monitored_namespaces':
-                     ns_list = json.loads(value)
-                     if isinstance(ns_list, list): merged_config[key] = ns_list
-                 elif key == 'loki_scan_min_level':
-                     merged_config[key] = value.upper()
-                 else: merged_config[key] = value # Giữ các config khác dạng string
+                 elif key in ['cpu_threshold_percent', 'mem_threshold_percent']:
+                      merged_config[key] = float(value)
+                 elif key in ['monitored_namespaces', 'monitored_services', 'monitored_logs', 'logql_queries']:
+                      parsed_list = json.loads(value)
+                      if isinstance(parsed_list, list): merged_config[key] = parsed_list
+                 elif key == 'disk_thresholds':
+                      parsed_dict = json.loads(value)
+                      if isinstance(parsed_dict, dict): merged_config[key] = parsed_dict
+                 else: # Giữ các config khác dạng string (ví dụ: loki_url, loki_scan_min_level)
+                     merged_config[key] = value
              except (ValueError, TypeError, json.JSONDecodeError) as parse_err:
                   logger.warning(f"Error parsing agent config key '{key}' for agent {agent_id}: {parse_err}. Value: '{value}'")
-                  merged_config[key] = value
+                  merged_config[key] = value # Giữ giá trị gốc nếu parse lỗi
 
-        # Thêm thông tin agent vào kết quả trả về cho Agent
-        merged_config['environment_type'] = agent_info.get('environment_type', 'unknown') if agent_info else 'unknown'
-        merged_config['environment_info'] = agent_info.get('environment_info', {}) if agent_info else {}
-
-        logger.info(f"Returning merged configuration for agent {agent_id}.")
+        logger.info(f"Returning merged configuration for agent {agent_id} (Type: {agent_type}).")
         return jsonify(merged_config), 200
     except Exception as e:
         logger.error(f"Error getting config for agent {agent_id}: {e}", exc_info=True)
         return jsonify({"error": f"Failed to retrieve configuration for agent {agent_id}"}), 500
 
+# --- Cập nhật API lưu config Agent General ---
 @app.route('/api/agents/<agent_id>/config/general', methods=['POST'])
-# @login_required # Bỏ decorator này
-# @admin_required # Quyền admin sẽ được kiểm tra ở Portal
 def save_agent_general_config_api(agent_id):
-    # API này cần cơ chế bảo mật riêng
     logger.info(f"--- POST /api/agents/{agent_id}/config/general endpoint hit ---")
-    # if current_user.role != 'admin': return jsonify({"error": "Admin privileges required"}), 403 # Bỏ check
     if not agent_id: return jsonify({"error": "Agent ID is required"}), 400
     if not request.is_json: return jsonify({"error": "Request must be JSON"}), 400
-    data = request.get_json(); logger.debug(f"Received general config data for agent {agent_id}: {data}")
-    config_to_save = {}; validation_errors = []; valid_log_levels = ["DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"]
+
+    data = request.get_json();
+    logger.debug(f"Received config data for agent {agent_id}: {data}")
+    config_to_save = {}; validation_errors = [];
+
+    # Lấy thông tin agent để biết loại
+    agent_info = db_manager.get_agent_info(DB_PATH, agent_id)
+    agent_type = agent_info.get('environment_type', 'unknown') if agent_info else 'unknown'
+    logger.info(f"Saving config for agent {agent_id} of type {agent_type}")
+
+    # --- Xử lý các trường chung ---
     try:
         if 'scan_interval_seconds' in data:
             scan_interval = int(data['scan_interval_seconds']);
             if scan_interval < 10: validation_errors.append("Scan interval must be >= 10")
             else: config_to_save['scan_interval_seconds'] = str(scan_interval)
+    except (ValueError, TypeError): validation_errors.append("Invalid scan_interval_seconds")
 
-        agent_info = db_manager.get_agent_info(DB_PATH, agent_id)
-        if agent_info and agent_info.get('environment_type') == 'kubernetes':
-            if 'restart_count_threshold' in data:
-                restart_threshold = int(data['restart_count_threshold']);
-                if restart_threshold < 1: validation_errors.append("Restart threshold must be >= 1")
-                else: config_to_save['restart_count_threshold'] = str(restart_threshold)
-
+    # --- Xử lý các trường theo loại agent ---
+    if agent_type == 'kubernetes':
+        valid_log_levels = ["DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"]
         if 'loki_scan_min_level' in data:
             scan_level = data['loki_scan_min_level'].upper();
             if scan_level not in valid_log_levels: validation_errors.append(f"Invalid Loki scan level: {scan_level}")
             else: config_to_save['loki_scan_min_level'] = scan_level
+        try:
+            if 'restart_count_threshold' in data:
+                restart_threshold = int(data['restart_count_threshold']);
+                if restart_threshold < 1: validation_errors.append("Restart threshold must be >= 1")
+                else: config_to_save['restart_count_threshold'] = str(restart_threshold)
+        except (ValueError, TypeError): validation_errors.append("Invalid restart_count_threshold")
 
-    except (ValueError, TypeError) as e: logger.error(f"Validation error processing general config for agent {agent_id}: {e}"); return jsonify({"error": f"Invalid input data type: {e}"}), 400
-    if validation_errors: logger.error(f"Validation failed for agent {agent_id} general config: {validation_errors}"); return jsonify({"error": "Validation failed", "details": validation_errors}), 400
-    if not config_to_save: return jsonify({"message": "No general settings provided to save."}), 200
+    elif agent_type == 'linux':
+        try:
+            if 'cpu_threshold_percent' in data: config_to_save['cpu_threshold_percent'] = float(data['cpu_threshold_percent'])
+            if 'mem_threshold_percent' in data: config_to_save['mem_threshold_percent'] = float(data['mem_threshold_percent'])
+            if 'disk_thresholds' in data: # Frontend gửi object
+                 if not isinstance(data['disk_thresholds'], dict): validation_errors.append("disk_thresholds must be a JSON object")
+                 else: config_to_save['disk_thresholds'] = data['disk_thresholds'] # Lưu trực tiếp object, db_manager sẽ dumps
+            if 'monitored_services' in data: # Frontend gửi list
+                 if not isinstance(data['monitored_services'], list): validation_errors.append("monitored_services must be a list")
+                 else: config_to_save['monitored_services'] = data['monitored_services']
+            if 'monitored_logs' in data: # Frontend gửi list of objects
+                 if not isinstance(data['monitored_logs'], list): validation_errors.append("monitored_logs must be a list")
+                 else: config_to_save['monitored_logs'] = data['monitored_logs']
+            if 'log_scan_keywords' in data: # Frontend gửi list
+                 if not isinstance(data['log_scan_keywords'], list): validation_errors.append("log_scan_keywords must be a list")
+                 else: config_to_save['log_scan_keywords'] = data['log_scan_keywords']
+            if 'log_scan_range_minutes' in data: config_to_save['log_scan_range_minutes'] = int(data['log_scan_range_minutes'])
+            if 'log_context_minutes' in data: config_to_save['log_context_minutes'] = int(data['log_context_minutes'])
+        except (ValueError, TypeError) as e: validation_errors.append(f"Invalid data type for Linux config: {e}")
+
+    elif agent_type == 'loki_source':
+         if 'loki_url' in data:
+             loki_url = data['loki_url'].strip()
+             if not loki_url: validation_errors.append("Loki URL cannot be empty")
+             # Basic URL validation (can be improved)
+             elif not loki_url.startswith(('http://', 'https://')): validation_errors.append("Invalid Loki URL format")
+             else: config_to_save['loki_url'] = loki_url
+         if 'logql_queries' in data:
+             queries = data['logql_queries']
+             if not isinstance(queries, list): validation_errors.append("logql_queries must be a list")
+             # Validate individual query objects (basic)
+             elif not all(isinstance(q, dict) and q.get("query") for q in queries):
+                  validation_errors.append("Each item in logql_queries must be an object with a 'query' key")
+             else: config_to_save['logql_queries'] = queries # Lưu list object, db_manager sẽ dumps
+         try:
+             if 'log_scan_range_minutes' in data: config_to_save['log_scan_range_minutes'] = int(data['log_scan_range_minutes'])
+             if 'loki_query_limit' in data: config_to_save['loki_query_limit'] = int(data['loki_query_limit'])
+         except (ValueError, TypeError): validation_errors.append("Invalid numeric value for Loki config")
+
+    # --- Kết thúc xử lý theo loại agent ---
+
+    if validation_errors:
+        logger.error(f"Validation failed for agent {agent_id} config: {validation_errors}")
+        return jsonify({"error": "Validation failed", "details": validation_errors}), 400
+
+    if not config_to_save:
+        return jsonify({"message": "No settings provided to save."}), 200
+
+    # Gọi db_manager để lưu (nó sẽ xử lý JSON dumps cho list/dict)
     success, message = db_manager.save_agent_config(DB_PATH, agent_id, config_to_save)
-    if success: return jsonify({"message": message}), 200
-    else: return jsonify({"error": message}), 500
+    if success:
+        # Không cần refresh config ở đây, agent sẽ tự lấy lại
+        return jsonify({"message": message}), 200
+    else:
+        return jsonify({"error": message}), 500
 
+# --- API lưu Namespaces (Chỉ cho K8s) ---
 @app.route('/api/agents/<agent_id>/config/namespaces', methods=['POST'])
-# @login_required # Bỏ decorator này
-# @admin_required # Quyền admin sẽ được kiểm tra ở Portal
 def save_agent_namespaces_api(agent_id):
-    # API này cần cơ chế bảo mật riêng
-    # if current_user.role != 'admin': return jsonify({"error": "Admin privileges required"}), 403 # Bỏ check
     agent_info = db_manager.get_agent_info(DB_PATH, agent_id)
     if not agent_info or agent_info.get('environment_type') != 'kubernetes':
         return jsonify({"error": "Namespace configuration is only applicable to Kubernetes agents."}), 400
@@ -612,22 +710,12 @@ def save_agent_namespaces_api(agent_id):
     namespaces = data.get('namespaces')
     if not isinstance(namespaces, list): return jsonify({"error": "'namespaces' must be a list"}), 400
     cleaned_namespaces = [str(ns).strip() for ns in namespaces if isinstance(ns, str) and str(ns).strip()]
+    # Lưu dưới dạng JSON string
     value_to_save = json.dumps(cleaned_namespaces)
     config_to_save = {'monitored_namespaces': value_to_save}
     success, message = db_manager.save_agent_config(DB_PATH, agent_id, config_to_save)
     if success: return jsonify({"message": message}), 200
     else: return jsonify({"error": message}), 500
-
-
-# --- API lấy thông tin cluster (chỉ dùng bởi Portal) ---
-# Endpoint này có thể cần @login_required nếu Portal yêu cầu
-# @app.route('/api/cluster/info')
-# @login_required
-# def get_cluster_info_proxy():
-#     logger.info("Forwarding request to ObsEngine: GET /api/cluster/info")
-#     # Endpoint này không tồn tại trong ObsEngine, Portal nên lấy thông tin này từ /api/agents/status
-#     # Hoặc tạo endpoint mới trong ObsEngine nếu cần tổng hợp thông tin cluster
-#     return jsonify({"error": "Endpoint not implemented in ObsEngine"}), 501
 
 
 if __name__ == '__main__':
@@ -638,4 +726,3 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=flask_port, debug=debug_mode, use_reloader=debug_mode)
 
 logger.info("--- ObsEngine app.py finished parsing (module level) ---")
-

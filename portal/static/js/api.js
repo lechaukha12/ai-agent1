@@ -103,22 +103,8 @@ export async function fetchAgentConfig(agentId) {
             throw new Error(`API Error: ${config.error}`);
         }
 
-        return {
-            scan_interval_seconds: config.scan_interval_seconds ?? 30,
-            restart_count_threshold: config.restart_count_threshold ?? 5,
-            loki_scan_min_level: config.loki_scan_min_level ?? 'INFO',
-            monitored_namespaces: Array.isArray(config.monitored_namespaces) ? config.monitored_namespaces : [],
-            environment_type: config.environment_type ?? 'unknown',
-            environment_info: config.environment_info ?? {},
-            cpu_threshold_percent: config.cpu_threshold_percent ?? 90.0,
-            mem_threshold_percent: config.mem_threshold_percent ?? 90.0,
-            disk_thresholds: config.disk_thresholds ?? {'/': 90.0},
-            monitored_services: Array.isArray(config.monitored_services) ? config.monitored_services : [],
-            monitored_logs: Array.isArray(config.monitored_logs) ? config.monitored_logs : [],
-            log_scan_keywords: Array.isArray(config.log_scan_keywords) ? config.log_scan_keywords : [],
-            log_scan_range_minutes: config.log_scan_range_minutes ?? 5,
-            log_context_minutes: config.log_context_minutes ?? 30,
-        };
+        // Trả về tất cả các trường có thể có, UI sẽ xử lý hiển thị
+        return config;
     } catch (error) {
         console.error(`Error fetching config for agent ${agentId}:`, error);
         throw error;
@@ -166,6 +152,30 @@ export async function saveAgentMonitoredNamespaces(agentId, namespaces) {
         throw error;
     }
 }
+
+// --- Thêm hàm lưu cấu hình Loki ---
+export async function saveAgentLokiConfig(agentId, configData) {
+    // Sử dụng lại endpoint general hoặc tạo endpoint mới '/loki' nếu backend hỗ trợ
+    const endpoint = `/api/agents/${encodeURIComponent(agentId)}/config/general`; // Hoặc /config/loki
+    console.debug(`Saving Loki config for agent ${agentId}:`, configData);
+    try {
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(configData), // Gửi các trường config Loki
+        });
+        const result = await response.json();
+        if (!response.ok || result.error) {
+            throw new Error(result.error || `HTTP error! status: ${response.status}`);
+        }
+        console.log(`Loki config saved for agent ${agentId}`);
+        return result;
+    } catch (error) {
+        console.error(`Error saving Loki config for agent ${agentId}:`, error);
+        throw error;
+    }
+}
+// ------------------------------------
 
 
 export async function fetchEnvironments() {

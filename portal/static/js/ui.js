@@ -1,3 +1,11 @@
+// --- Thêm các biến tham chiếu cho tab Loki ---
+const agentLokiUrlInput = document.getElementById('agent-loki-url');
+const agentLogqlQueriesTextarea = document.getElementById('agent-logql-queries');
+const agentLokiScanRangeInput = document.getElementById('agent-loki-scan-range');
+const agentLokiQueryLimitInput = document.getElementById('agent-loki-query-limit');
+const agentEnvLokiInfoSpan = document.getElementById('agent-env-loki-info'); // Span hiển thị thông tin Loki Agent
+
+// --- Các biến khác giữ nguyên ---
 const loadingSpinner = document.getElementById('loading-spinner');
 const loadingOverlay = document.getElementById('loading-overlay');
 const sidebarItems = document.querySelectorAll('.sidebar-item');
@@ -38,7 +46,7 @@ const passwordMatchError = document.getElementById('password-match-error');
 const agentStatusTableBody = document.getElementById('agent-status-table-body');
 const agentStatusErrorElem = document.getElementById('agent-status-error');
 const agentScanIntervalInput = document.getElementById('agent-scan-interval');
-const agentLokiScanLevelSelect = document.getElementById('agent-loki-scan-level');
+const agentLokiScanLevelSelect = document.getElementById('agent-loki-scan-level'); // Giữ lại nhưng sẽ ẩn/hiện
 
 const agentEnvInfoLoading = document.getElementById('agent-env-info-loading');
 const agentEnvHostnameSpan = document.getElementById('agent-env-hostname');
@@ -340,7 +348,6 @@ function formatUptime(seconds) {
     const mDisplay = m > 0 ? m + (m === 1 ? " minute, " : " minutes, ") : "";
     const sDisplay = s + (s === 1 ? " second" : " seconds");
 
-    // Show more detail for shorter uptimes
     if (d > 0) return dDisplay + hDisplay.replace(", ", "");
     if (h > 0) return hDisplay + mDisplay.replace(", ", "");
     if (m > 0) return mDisplay + sDisplay;
@@ -357,6 +364,7 @@ export function populateAgentConfigForm(agentConfig, environmentName, environmen
     if (agentEnvInfoLoading) agentEnvInfoLoading.classList.add('hidden');
     document.querySelectorAll('.agent-env-info-item').forEach(el => el.classList.add('hidden'));
 
+    // --- Hiển thị thông tin môi trường phù hợp ---
     if (environmentType === 'kubernetes') {
         const k8sInfo = environmentInfo?.kubernetes_info || {};
         setText(agentEnvK8sVersionSpan, k8sInfo.k8s_version);
@@ -373,24 +381,33 @@ export function populateAgentConfigForm(agentConfig, environmentName, environmen
         if (agentEnvOsSpan?.parentElement) agentEnvOsSpan.parentElement.classList.remove('hidden');
         if (agentEnvKernelSpan?.parentElement) agentEnvKernelSpan.parentElement.classList.remove('hidden');
         if (agentEnvUptimeSpan?.parentElement) agentEnvUptimeSpan.parentElement.classList.remove('hidden');
+    } else if (environmentType === 'loki_source') {
+         // Hiển thị thông tin đơn giản cho Loki Agent
+         setText(agentEnvLokiInfoSpan, `Agent lấy log từ Loki`);
+         if (agentEnvLokiInfoSpan?.parentElement) agentEnvLokiInfoSpan.parentElement.classList.remove('hidden');
+    }
+    // Thêm else if cho các loại agent khác (windows, docker) nếu cần
+
+    // --- Điền cấu hình chung ---
+    if (agentScanIntervalInput) agentScanIntervalInput.value = agentConfig.scan_interval_seconds ?? (environmentType === 'loki_source' ? 60 : 30); // Default khác cho Loki
+    // Ẩn/hiện Loki Scan Level tùy loại agent
+    const lokiLevelContainer = agentLokiScanLevelSelect?.closest('div');
+    if(lokiLevelContainer) lokiLevelContainer.classList.toggle('hidden', environmentType === 'loki_source'); // Ẩn nếu là Loki Agent
+    if (agentLokiScanLevelSelect && environmentType !== 'loki_source') {
+        agentLokiScanLevelSelect.value = agentConfig.loki_scan_min_level ?? 'INFO';
     }
 
-    if (agentScanIntervalInput) agentScanIntervalInput.value = agentConfig.scan_interval_seconds ?? 30;
-    if (agentLokiScanLevelSelect) agentLokiScanLevelSelect.value = agentConfig.loki_scan_min_level ?? 'INFO';
 
-
+    // --- Điền cấu hình K8s ---
     if (agentRestartThresholdInput) agentRestartThresholdInput.value = agentConfig.restart_count_threshold ?? 5;
 
-
+    // --- Điền cấu hình Linux ---
     if (agentCpuThresholdInput) agentCpuThresholdInput.value = agentConfig.cpu_threshold_percent ?? 90.0;
     if (agentMemThresholdInput) agentMemThresholdInput.value = agentConfig.mem_threshold_percent ?? 90.0;
     if (agentDiskThresholdsTextarea) {
         try {
             agentDiskThresholdsTextarea.value = JSON.stringify(agentConfig.disk_thresholds || {'/': 90.0}, null, 2);
-        } catch (e) {
-            agentDiskThresholdsTextarea.value = '{"/": 90.0}';
-            console.error("Error stringifying disk_thresholds", e);
-        }
+        } catch (e) { agentDiskThresholdsTextarea.value = '{\n  "/": 90.0\n}'; console.error("Error stringify disk_thresholds", e); }
     }
     if (agentMonitoredServicesTextarea) {
         agentMonitoredServicesTextarea.value = (agentConfig.monitored_services || []).join('\n');
@@ -398,16 +415,33 @@ export function populateAgentConfigForm(agentConfig, environmentName, environmen
     if (agentMonitoredLogsTextarea) {
          try {
             agentMonitoredLogsTextarea.value = JSON.stringify(agentConfig.monitored_logs || [], null, 2);
-        } catch (e) {
-            agentMonitoredLogsTextarea.value = '[]';
-            console.error("Error stringifying monitored_logs", e);
-        }
+        } catch (e) { agentMonitoredLogsTextarea.value = '[]'; console.error("Error stringify monitored_logs", e); }
     }
     if (agentLogScanKeywordsTextarea) {
-        agentLogScanKeywordsTextarea.value = (agentConfig.log_scan_keywords || []).join(', ');
+        agentLogScanKeywordsTextarea.value = (agentConfig.log_scan_keywords || ["ERROR", "WARN", "CRITICAL", "FATAL", "PANIC", "EXCEPTION", "Traceback"]).join(', ');
     }
     if (agentLogScanRangeInput) agentLogScanRangeInput.value = agentConfig.log_scan_range_minutes ?? 5;
     if (agentLogContextMinutesInput) agentLogContextMinutesInput.value = agentConfig.log_context_minutes ?? 30;
+
+    // --- Điền cấu hình Loki ---
+    if (agentLokiUrlInput) agentLokiUrlInput.value = agentConfig.loki_url || '';
+    if (agentLogqlQueriesTextarea) {
+        // Hiển thị query dạng text, mỗi dòng một query nếu là list string
+        // Hoặc hiển thị dạng JSON nếu là list object
+        const queries = agentConfig.logql_queries || [];
+        if (queries.length > 0 && typeof queries[0] === 'string') {
+            agentLogqlQueriesTextarea.value = queries.join('\n');
+        } else {
+             try {
+                 agentLogqlQueriesTextarea.value = JSON.stringify(queries, null, 2);
+             } catch (e) {
+                 agentLogqlQueriesTextarea.value = '[]';
+                 console.error("Error stringify logql_queries", e);
+             }
+        }
+    }
+    if (agentLokiScanRangeInput) agentLokiScanRangeInput.value = agentConfig.log_scan_range_minutes ?? 5; // Dùng chung input với Linux
+    if (agentLokiQueryLimitInput) agentLokiQueryLimitInput.value = agentConfig.loki_query_limit ?? 500;
 
 
     updateAgentConfigVisibility(environmentType);
@@ -417,7 +451,7 @@ export function updateAgentConfigVisibility(environmentType = 'unknown') {
     console.debug(`Updating config visibility for type: ${environmentType}`);
 
     const allTabs = document.querySelectorAll('.agent-config-tab');
-    let firstVisibleTab = 'agent-general';
+    let firstVisibleTab = 'agent-general'; // Mặc định luôn là tab general
 
     allTabs.forEach(tab => {
         const tabType = tab.getAttribute('data-tab');
@@ -427,26 +461,32 @@ export function updateAgentConfigVisibility(environmentType = 'unknown') {
             shouldShow = true;
         } else if (tabType === 'agent-k8s' && environmentType === 'kubernetes') {
             shouldShow = true;
-            firstVisibleTab = 'agent-k8s';
         } else if (tabType === 'agent-linux' && environmentType === 'linux') {
             shouldShow = true;
-            firstVisibleTab = 'agent-linux';
+        } else if (tabType === 'agent-loki' && environmentType === 'loki_source') { // Thêm điều kiện cho Loki
+            shouldShow = true;
         } else if (tabType === 'agent-windows' && environmentType === 'windows') {
             shouldShow = true;
-            firstVisibleTab = 'agent-windows';
         } else if (tabType === 'agent-docker' && environmentType === 'docker') {
             shouldShow = true;
-            firstVisibleTab = 'agent-docker';
         }
+        // Thêm else if cho các loại agent khác
 
         tab.classList.toggle('hidden', !shouldShow);
     });
 
+    // Xác định tab nào sẽ active mặc định khi mở form config
+    if (environmentType === 'kubernetes') firstVisibleTab = 'agent-k8s';
+    else if (environmentType === 'linux') firstVisibleTab = 'agent-linux';
+    else if (environmentType === 'loki_source') firstVisibleTab = 'agent-loki'; // Active tab Loki
+    // Thêm else if cho các loại agent khác
+
+    // Kích hoạt tab đã xác định
     const tabsContainer = document.querySelector('nav[aria-label="Tabs"]');
     if (tabsContainer) {
-        const firstVisibleTabButton = tabsContainer.querySelector(`.agent-config-tab[data-tab="${firstVisibleTab}"]`);
-        if(firstVisibleTabButton && !firstVisibleTabButton.classList.contains('hidden')) {
-             // Activate the determined first visible tab
+        const targetTabButton = tabsContainer.querySelector(`.agent-config-tab[data-tab="${firstVisibleTab}"]`);
+        // Chỉ kích hoạt nếu tab đó thực sự hiển thị
+        if(targetTabButton && !targetTabButton.classList.contains('hidden')) {
              allTabs.forEach(t => {
                  const isTarget = t.getAttribute('data-tab') === firstVisibleTab;
                  t.classList.toggle('border-indigo-500', isTarget);
@@ -457,10 +497,10 @@ export function updateAgentConfigVisibility(environmentType = 'unknown') {
                  t.classList.toggle('hover:border-gray-300', !isTarget);
              });
         } else {
-             // Fallback to activate general if the determined first tab is somehow hidden
+             // Fallback về tab general nếu tab đích bị ẩn
+             firstVisibleTab = 'agent-general';
              const generalTabButton = tabsContainer.querySelector('.agent-config-tab[data-tab="agent-general"]');
              if (generalTabButton) {
-                 firstVisibleTab = 'agent-general';
                  allTabs.forEach(t => {
                      const isTarget = t.getAttribute('data-tab') === firstVisibleTab;
                      t.classList.toggle('border-indigo-500', isTarget);
@@ -475,6 +515,7 @@ export function updateAgentConfigVisibility(environmentType = 'unknown') {
     }
 
 
+    // Hiển thị nội dung của tab được active
     const allContents = document.querySelectorAll('.agent-config-tab-content');
     allContents.forEach(content => {
         content.classList.toggle('hidden', content.id !== `${firstVisibleTab}-tab`);
@@ -623,6 +664,9 @@ export function populateEnvironmentFilter(environments) {
             option.textContent = env;
             filterSelect.appendChild(option);
         });
-        filterSelect.value = currentValue;
+        // Restore previous selection if possible
+        if (Array.from(filterSelect.options).some(opt => opt.value === currentValue)) {
+             filterSelect.value = currentValue;
+        }
     });
 }

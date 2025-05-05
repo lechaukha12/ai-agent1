@@ -60,10 +60,12 @@ const saveAgentGeneralConfigButton = document.getElementById('save-agent-general
 const saveAgentGeneralConfigStatus = document.getElementById('save-agent-general-config-status');
 const agentNamespaceListDiv = document.getElementById('agent-namespace-list');
 const agentNamespaceLoadingText = document.getElementById('agent-namespace-loading-text');
-const saveAgentK8sConfigButton = document.getElementById('save-agent-k8s-config-button'); // Renamed from saveAgentNsConfigButton
-const saveAgentK8sConfigStatus = document.getElementById('save-agent-k8s-config-status'); // Renamed from saveAgentNsConfigStatus
-const saveAgentLinuxConfigButton = document.getElementById('save-agent-linux-config-button'); // New button for Linux
-const saveAgentLinuxConfigStatus = document.getElementById('save-agent-linux-config-status'); // New status for Linux
+const saveAgentK8sConfigButton = document.getElementById('save-agent-k8s-config-button');
+const saveAgentK8sConfigStatus = document.getElementById('save-agent-k8s-config-status');
+const saveAgentLinuxConfigButton = document.getElementById('save-agent-linux-config-button');
+const saveAgentLinuxConfigStatus = document.getElementById('save-agent-linux-config-status');
+const saveAgentLokiConfigButton = document.getElementById('save-agent-loki-config-button'); // New button for Loki
+const saveAgentLokiConfigStatus = document.getElementById('save-agent-loki-config-status'); // New status for Loki
 const closeAgentConfigButton = document.getElementById('close-agent-config-button');
 
 const usersTableBody = document.getElementById('users-table-body');
@@ -393,7 +395,7 @@ async function handleConfigureAgentClick(agentId, environmentName, environmentTy
 
     currentConfiguringAgentId = agentId;
     ui.showLoading();
-    const statuses = [saveAgentGeneralConfigStatus, saveAgentK8sConfigStatus, saveAgentLinuxConfigStatus];
+    const statuses = [saveAgentGeneralConfigStatus, saveAgentK8sConfigStatus, saveAgentLinuxConfigStatus, saveAgentLokiConfigStatus]; // Add Loki status
     statuses.forEach(el => { if (el) el.classList.add('hidden'); });
 
     ui.setText(configAgentIdSpan, agentId);
@@ -503,16 +505,19 @@ async function handleSaveAgentGeneralConfig() {
     let configData = {};
     try {
         const scanIntervalInput = document.getElementById('agent-scan-interval');
-        const scanLevelSelect = document.getElementById('agent-loki-scan-level');
+        const scanLevelSelect = document.getElementById('agent-loki-scan-level'); // Vẫn lấy nhưng có thể không gửi
 
         const scanInterval = parseInt(scanIntervalInput?.value ?? '0');
-        const scanLevel = scanLevelSelect?.value ?? 'INFO';
-
         if (isNaN(scanInterval) || scanInterval < 10) {
             throw new Error("Tần suất quét phải là số >= 10.");
         }
         configData.scan_interval_seconds = scanInterval;
-        configData.loki_scan_min_level = scanLevel; // Include Loki level even if not K8s, backend might ignore
+
+        // Chỉ gửi loki_scan_min_level nếu không phải là Loki Agent
+        const currentEnvType = document.getElementById('config-agent-env-type')?.textContent;
+        if (currentEnvType !== 'loki_source' && scanLevelSelect) {
+            configData.loki_scan_min_level = scanLevelSelect.value ?? 'INFO';
+        }
 
         await api.saveAgentGeneralConfig(currentConfiguringAgentId, configData);
         ui.showStatusMessage(saveAgentGeneralConfigStatus, 'Đã lưu thành công!', 'success');
@@ -562,8 +567,9 @@ async function handleSaveAgentK8sConfig() {
         }
         k8sSpecificConfig.restart_count_threshold = restartThreshold;
 
+        // Gửi cả config K8s và namespaces
         const nsPromise = api.saveAgentMonitoredNamespaces(currentConfiguringAgentId, selectedNamespaces);
-        const generalPromise = api.saveAgentGeneralConfig(currentConfiguringAgentId, k8sSpecificConfig);
+        const generalPromise = api.saveAgentGeneralConfig(currentConfiguringAgentId, k8sSpecificConfig); // Gửi ngưỡng restart qua endpoint general
 
         await Promise.all([nsPromise, generalPromise]);
 
@@ -640,9 +646,10 @@ async function handleSaveAgentLinuxConfig() {
 
         linuxConfigData.log_scan_keywords = logKeywordsStr.split(/[\n,]+/).map(k => k.trim()).filter(Boolean);
         linuxConfigData.log_scan_range_minutes = logScanRange;
-        linux_config_data.log_context_minutes = logContextMinutes;
+        linuxConfigData.log_context_minutes = logContextMinutes;
 
 
+        // Gửi tất cả cấu hình Linux qua endpoint general
         await api.saveAgentGeneralConfig(currentConfiguringAgentId, linuxConfigData);
         ui.showStatusMessage(saveAgentLinuxConfigStatus, 'Đã lưu thành công!', 'success');
 
@@ -658,6 +665,83 @@ async function handleSaveAgentLinuxConfig() {
         }
     }
 }
+
+// --- Thêm hàm xử lý lưu cấu hình Loki ---
+async function handleSaveAgentLokiConfig() {
+    if (!currentConfiguringAgentId || !saveAgentLokiConfigButton || !saveAgentLokiConfigStatus) return;
+
+    const lokiTabContent = document.getElementById('agent-loki-tab');
+    if (!lokiTabContent || lokiTabContent.classList.contains('hidden')) {
+        console.warn("Attempted to save Loki config for a non-Loki agent or hidden tab.");
+        return;
+    }
+
+    ui.showLoading();
+    saveAgentLokiConfigButton.disabled = true;
+    ui.showStatusMessage(saveAgentLokiConfigStatus, 'Đang lưu...', 'info');
+
+    let lokiConfigData = {};
+    try {
+        const lokiUrlInput = document.getElementById('agent-loki-url');
+        const logqlQueriesTextarea = document.getElementById('agent-logql-queries');
+        const scanRangeInput = document.getElementById('agent-loki-scan-range');
+        const queryLimitInput = document.getElementById('agent-loki-query-limit');
+
+        const lokiUrl = lokiUrlInput?.value.trim();
+        const logqlQueriesRaw = logqlQueriesTextarea?.value.trim() ?? '';
+        const scanRange = parseInt(scanRangeInput?.value ?? '5');
+        const queryLimit = parseInt(queryLimitInput?.value ?? '500');
+
+        if (!lokiUrl) throw new Error("Loki URL là bắt buộc.");
+        if (isNaN(scanRange) || scanRange < 1) throw new Error("Khoảng thời gian quét Log không hợp lệ.");
+        if (isNaN(queryLimit) || queryLimit < 10) throw new Error("Giới hạn số dòng log phải >= 10.");
+
+        lokiConfigData.loki_url = lokiUrl;
+        lokiConfigData.log_scan_range_minutes = scanRange;
+        lokiConfigData.loki_query_limit = queryLimit;
+
+        // Xử lý LogQL queries: Thử parse JSON array trước, nếu lỗi thì coi là list các query ngăn cách bởi newline
+        let parsedQueries = [];
+        if (logqlQueriesRaw.startsWith('[') && logqlQueriesRaw.endsWith(']')) {
+            try {
+                parsedQueries = JSON.parse(logqlQueriesRaw);
+                if (!Array.isArray(parsedQueries)) throw new Error("Input không phải JSON array.");
+                // Validate thêm cấu trúc object bên trong nếu cần
+                parsedQueries = parsedQueries.filter(q => typeof q === 'object' && q !== null && q.query);
+            } catch (e) {
+                // Nếu parse JSON lỗi, fallback về split theo newline
+                console.warn("Failed to parse LogQL queries as JSON, falling back to newline split:", e);
+                parsedQueries = logqlQueriesRaw.split('\n')
+                                    .map(q => q.trim())
+                                    .filter(Boolean)
+                                    .map(q => ({ query: q })); // Chuyển thành cấu trúc object đơn giản
+            }
+        } else {
+            // Nếu không phải JSON array, split theo newline
+            parsedQueries = logqlQueriesRaw.split('\n')
+                                .map(q => q.trim())
+                                .filter(Boolean)
+                                .map(q => ({ query: q }));
+        }
+        lokiConfigData.logql_queries = parsedQueries;
+
+        // Gọi API để lưu (sử dụng hàm mới hoặc hàm general đã sửa đổi)
+        await api.saveAgentLokiConfig(currentConfiguringAgentId, lokiConfigData); // Hoặc saveAgentGeneralConfig nếu backend gộp chung
+        ui.showStatusMessage(saveAgentLokiConfigStatus, 'Đã lưu thành công!', 'success');
+
+    } catch (error) {
+        console.error(`Error saving Loki config for agent ${currentConfiguringAgentId}:`, error);
+        alert(`Lỗi lưu cấu hình Loki: ${error.message}`);
+        ui.showStatusMessage(saveAgentLokiConfigStatus, `Lỗi: ${error.message}`, 'error');
+    } finally {
+        ui.hideLoading();
+        saveAgentLokiConfigButton.disabled = false;
+        if (saveAgentLokiConfigStatus && !saveAgentLokiConfigStatus.textContent.startsWith('Lỗi')) {
+            ui.hideStatusMessage(saveAgentLokiConfigStatus);
+        }
+    }
+}
+// -------------------------------------
 
 
 function handleCloseAgentConfig() {
@@ -782,7 +866,7 @@ function applyRolePermissions() {
     document.querySelector('a[href="#settings"]')?.parentElement?.classList.toggle('hidden', !isAdmin);
     document.querySelector('a[href="#user-management"]')?.parentElement?.classList.toggle('hidden', !isAdmin);
 
-    [saveTelegramConfigButton, saveAiConfigButton, saveAgentGeneralConfigButton, saveAgentK8sConfigButton, saveAgentLinuxConfigButton, createUserButton, saveUserChangesButton]
+    [saveTelegramConfigButton, saveAiConfigButton, saveAgentGeneralConfigButton, saveAgentK8sConfigButton, saveAgentLinuxConfigButton, saveAgentLokiConfigButton, createUserButton, saveUserChangesButton] // Add Loki save button
         .forEach(btn => { if(btn) btn.disabled = !isAdmin; });
 
     if (openCreateUserModalButton) openCreateUserModalButton.disabled = !isAdmin;
@@ -887,7 +971,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     if (saveAgentGeneralConfigButton) saveAgentGeneralConfigButton.addEventListener('click', handleSaveAgentGeneralConfig);
     if (saveAgentK8sConfigButton) saveAgentK8sConfigButton.addEventListener('click', handleSaveAgentK8sConfig);
-    if (saveAgentLinuxConfigButton) saveAgentLinuxConfigButton.addEventListener('click', handleSaveAgentLinuxConfig); // Add listener for Linux save
+    if (saveAgentLinuxConfigButton) saveAgentLinuxConfigButton.addEventListener('click', handleSaveAgentLinuxConfig);
+    if (saveAgentLokiConfigButton) saveAgentLokiConfigButton.addEventListener('click', handleSaveAgentLokiConfig); // Add listener
     if (closeAgentConfigButton) closeAgentConfigButton.addEventListener('click', handleCloseAgentConfig);
     if (refreshAgentStatusButton) refreshAgentStatusButton.addEventListener('click', loadAgentStatus);
     if (addAgentButton) {

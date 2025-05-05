@@ -49,9 +49,12 @@
         </h3>
 
         <div class="border-b border-gray-200 mb-6">
-            <nav class="-mb-px flex space-x-8" aria-label="Tabs">
+            <nav class="-mb-px flex space-x-8 overflow-x-auto" aria-label="Tabs">
                  <button data-tab="agent-general" class="agent-config-tab whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-indigo-500 text-indigo-600">
                     Cài đặt chung & Thông tin Môi trường
+                </button>
+                <button data-tab="agent-loki" class="agent-config-tab agent-config-tab-loki hidden whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">
+                    Cấu hình Loki
                 </button>
                 <button data-tab="agent-k8s" class="agent-config-tab agent-config-tab-k8s hidden whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">
                     Cấu hình Kubernetes
@@ -77,6 +80,7 @@
                  <div class="agent-env-info-item hidden"><strong>Uptime:</strong> <span id="agent-env-uptime"></span></div>
                  <div class="agent-env-info-item hidden"><strong>K8s Version:</strong> <span id="agent-env-k8s-version"></span></div>
                  <div class="agent-env-info-item hidden"><strong>Node Count:</strong> <span id="agent-env-node-count"></span></div>
+                 <div class="agent-env-info-item hidden"><strong>Loki Source Info:</strong> <span id="agent-env-loki-info"></span></div> {# Placeholder for Loki agent info #}
              </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
@@ -84,7 +88,7 @@
                     <input type="number" id="agent-scan-interval" name="scan_interval_seconds" min="10" step="1" class="form-input w-full">
                     <p class="form-description">Khoảng thời gian giữa các lần quét (tối thiểu 10).</p>
                 </div>
-                 <div>
+                 <div class="agent-loki-only hidden"> {# Hide Loki level if not Loki agent #}
                     <label for="agent-loki-scan-level" class="form-label">Mức log quét Loki tối thiểu (Nếu dùng Loki)</label>
                     <select id="agent-loki-scan-level" name="loki_scan_min_level" class="form-select w-full">
                         <option value="DEBUG">DEBUG</option>
@@ -102,6 +106,38 @@
                      Lưu Cài đặt chung Agent
                  </button>
             </div>
+        </div>
+
+        <div id="agent-loki-tab" class="agent-config-tab-content agent-config-tab-loki hidden space-y-6">
+            <p class="text-sm text-gray-600">Cấu hình dành riêng cho agent lấy log từ Loki.</p>
+            <div>
+                <label for="agent-loki-url" class="form-label">Loki URL <span class="text-red-500">*</span></label>
+                <input type="url" id="agent-loki-url" name="loki_url" required class="form-input w-full" placeholder="Ví dụ: http://loki.example.com:3100">
+                <p class="form-description">Địa chỉ API endpoint của Loki.</p>
+            </div>
+            <div class="md:col-span-2">
+                 <label for="agent-logql-queries" class="form-label">LogQL Queries <span class="text-red-500">*</span></label>
+                 <textarea id="agent-logql-queries" name="logql_queries" rows="8" class="form-textarea w-full font-mono text-sm" placeholder='Nhập mỗi query trên một dòng hoặc dưới dạng JSON array:&#10;Ví dụ 1 (mỗi dòng 1 query):&#10;{service_name="app-1"} |= "error"&#10;{service_name="app-2"} | json | level="warning"&#10;&#10;Ví dụ 2 (JSON array):&#10;[{"query": "{job=\"app-1\"} |= \\"error\\"", "service_name": "App 1 Errors"}, {"query": "{job=\"app-2\"}"}]'></textarea>
+                 <p class="form-description">Nhập các truy vấn LogQL để agent thực thi. Có thể nhập mỗi query trên một dòng, hoặc nhập một JSON array chứa các object `{"query": "...", "service_name": "..."}` (tùy chọn `service_name` để định danh).</p>
+             </div>
+             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                 <div>
+                     <label for="agent-loki-scan-range" class="form-label">Khoảng thời gian quét Log (phút)</label>
+                     <input type="number" id="agent-loki-scan-range" name="log_scan_range_minutes" min="1" step="1" class="form-input w-full">
+                     <p class="form-description">Quét log trong bao nhiêu phút gần nhất.</p>
+                 </div>
+                 <div>
+                     <label for="agent-loki-query-limit" class="form-label">Giới hạn số dòng log / query</label>
+                     <input type="number" id="agent-loki-query-limit" name="loki_query_limit" min="10" step="10" class="form-input w-full">
+                     <p class="form-description">Số dòng log tối đa trả về cho mỗi query.</p>
+                 </div>
+             </div>
+             <div class="flex justify-end items-center pt-4">
+                 <span id="save-agent-loki-config-status" class="text-sm mr-4 hidden"></span>
+                 <button id="save-agent-loki-config-button" class="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-2 px-5 rounded-lg shadow transition duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+                     Lưu Cấu hình Loki
+                 </button>
+             </div>
         </div>
 
         <div id="agent-k8s-tab" class="agent-config-tab-content agent-config-tab-k8s hidden space-y-6">
@@ -204,17 +240,17 @@
                 <p>Để thêm một agent mới, bạn cần triển khai nó trên môi trường đó (ví dụ: Kubernetes cluster, máy ảo Linux, Windows Server,...).</p>
                 <p>Các bước triển khai chung:</p>
                 <ol>
-                    <li>Chuẩn bị gói cài đặt hoặc manifest phù hợp với nền tảng (ví dụ: manifest K8s, file binary `obsagent` cho Linux).</li>
+                    <li>Chuẩn bị gói cài đặt hoặc manifest phù hợp với nền tảng (ví dụ: manifest K8s, file binary `obsagent` cho Linux, Docker image `loki-agent`).</li>
                     <li>Cấu hình các thông số cần thiết cho agent:
                         <ul>
                             <li>**Đối với K8s Agent:** Sử dụng ConfigMap/Secret để đặt biến môi trường (`OBS_ENGINE_URL`, `AGENT_ID`, `K8S_CLUSTER_NAME`, `LOKI_URL`,...).</li>
                             <li>**Đối với Linux Agent:** Tạo file cấu hình `obsengine.cfg` (ví dụ: trong `/etc/obsagent/`) với các thông số `ObsEngineURL`, `AgentID`, `EnvironmentName`, và các tùy chọn giám sát khác.</li>
+                            <li>**Đối với Loki Agent:** Cung cấp biến môi trường `OBS_ENGINE_URL`, `AGENT_ID`, `ENVIRONMENT_NAME` khi chạy container. Cấu hình chi tiết (Loki URL, LogQL queries) sẽ được thực hiện qua giao diện Portal này.</li>
                         </ul>
                     </li>
-                    <li>Thực hiện triển khai agent trên môi trường mục tiêu (ví dụ: `kubectl apply`, chạy file binary `obsagent` dưới dạng service systemd).</li>
+                    <li>Thực hiện triển khai agent trên môi trường mục tiêu (ví dụ: `kubectl apply`, chạy file binary `obsagent` dưới dạng service systemd, chạy `docker run` cho `loki-agent`).</li>
                 </ol>
-                <p>Sau khi triển khai và khởi chạy thành công, agent sẽ tự động kết nối và xuất hiện trong danh sách "Trạng thái Agent" ở trên.</p>
-                <p><em>Lưu ý: Chức năng tạo agent trực tiếp từ giao diện này chưa được hỗ trợ. Vui lòng tham khảo tài liệu triển khai chi tiết cho từng loại nền tảng.</em></p>
+                <p>Sau khi triển khai và khởi chạy thành công, agent sẽ tự động kết nối và xuất hiện trong danh sách "Trạng thái Agent" ở trên. Bạn có thể vào phần "Cấu hình" của agent đó để tinh chỉnh các thiết lập giám sát.</p>
              </div>
               <div class="flex justify-end items-center pt-4 mt-4 border-t">
                     <button id="add-agent-modal-understand-button" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-5 rounded-lg shadow transition duration-200 ease-in-out">
