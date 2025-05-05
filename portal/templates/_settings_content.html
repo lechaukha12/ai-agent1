@@ -38,7 +38,7 @@
              <h3 class="text-xl font-semibold mb-4 text-gray-700">Cấu hình Phân tích AI</h3>
              <div class="space-y-4">
                  <div class="flex items-center justify-between">
-                     <label for="enable-ai-toggle" class="form-label">Bật Phân tích AI</label>
+                     <label for="enable-ai-toggle" class="form-label mb-0">Bật Phân tích AI</label>
                      <label class="toggle-switch">
                          <input type="checkbox" id="enable-ai-toggle">
                          <span class="toggle-slider"></span>
@@ -50,23 +50,30 @@
                          <select id="ai-provider-select" name="ai_provider" class="form-select mt-1 block w-full">
                              <option value="gemini">Google Gemini</option>
                              <option value="local">Local Model</option>
-                             <option value="openai">OpenAI (Chưa hỗ trợ)</option>
-                             <option value="groq">Groq (Chưa hỗ trợ)</option>
-                             <option value="deepseek">Deepseek (Chưa hỗ trợ)</option>
-                             <option value="none">Không sử dụng (Tắt)</option>
+                             <option value="openai" disabled>OpenAI (Chưa hỗ trợ)</option>
+                             <option value="groq" disabled>Groq (Chưa hỗ trợ)</option>
+                             <option value="deepseek" disabled>Deepseek (Chưa hỗ trợ)</option>
+                             {# Loại bỏ option value="none" #}
                          </select>
                      </div>
-                      <div>
+                      <div class="model-id-field"> {# Giữ nguyên class này #}
                          <label for="ai-model-identifier" class="form-label">Model Identifier</label>
                          <input type="text" name="ai_model_identifier" id="ai-model-identifier" placeholder="Ví dụ: gemini-1.5-flash"
                                 class="form-input mt-1 block w-full">
-                          <p class="form-description">Nhập tên model cụ thể (ví dụ: gemini-1.5-flash, gpt-4o, ...). Để trống nếu dùng provider 'local'.</p>
+                          <p class="form-description">Nhập tên model cụ thể (ví dụ: gemini-1.5-flash, gpt-4o, ...). Không cần thiết cho 'Local Model'.</p> {# Cập nhật mô tả #}
                      </div>
-                      <div>
+                      {# Thêm trường mới cho Local Endpoint URL #}
+                      <div class="local-endpoint-field hidden"> {# Thêm class mới và ẩn ban đầu #}
+                         <label for="local-gemini-endpoint" class="form-label">Local Model Endpoint URL</label>
+                         <input type="url" name="local_gemini_endpoint" id="local-gemini-endpoint" placeholder="Ví dụ: http://localhost:8000/v1/chat/completions"
+                                class="form-input mt-1 block w-full">
+                         <p class="form-description">URL của API endpoint cho model AI đang chạy local.</p>
+                     </div>
+                      <div class="api-key-field"> {# Giữ nguyên class này #}
                          <label for="ai-api-key" class="form-label">API Key</label>
                          <input type="password" name="ai_api_key" id="ai-api-key" placeholder="Để trống nếu không thay đổi"
                                 class="form-input mt-1 block w-full">
-                         <p class="form-description">Nhập API key mới nếu muốn cập nhật. Key sẽ không được hiển thị lại.</p>
+                         <p class="form-description">Nhập API key nếu provider yêu cầu. Không cần thiết cho 'Local Model'.</p> {# Cập nhật mô tả #}
                      </div>
                  </div>
                  <div class="flex justify-end items-center pt-4">

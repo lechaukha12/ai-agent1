@@ -1,4 +1,4 @@
-# ai-agent1/obsengine/obsengine_config.py
+# -*- coding: utf-8 -*-
 import os
 import time
 import json
@@ -10,18 +10,16 @@ except ImportError:
     logging.critical("[Config Manager - ObsEngine] Failed to import db_manager. Config loading from DB will fail.")
     db_manager = None
 
-# --- Default Configuration Values ---
+
 DEFAULT_DB_PATH = "/data/obsengine_data.db"
-# --- THAY ĐỔI Ở ĐÂY ---
-DEFAULT_ENABLE_AI_ANALYSIS = False # Đặt thành False để tắt AI mặc định
-# ---------------------
-DEFAULT_AI_PROVIDER = "gemini" # Vẫn giữ Gemini làm provider mặc định nếu bật AI sau
+DEFAULT_ENABLE_AI_ANALYSIS = False
+DEFAULT_AI_PROVIDER = "gemini"
 DEFAULT_AI_MODEL_IDENTIFIER = "gemini-1.5-flash"
-DEFAULT_LOCAL_GEMINI_ENDPOINT = ""
+DEFAULT_LOCAL_GEMINI_ENDPOINT = "" # Giữ giá trị mặc định là rỗng
 DEFAULT_MONITORED_NAMESPACES_STR = "kube-system,default"
 DEFAULT_PROMPT_TEMPLATE = """
-Phân tích tình huống của pod Kubernetes '{namespace}/{pod_name}'.
-**Ưu tiên xem xét ngữ cảnh Kubernetes** được cung cấp dưới đây vì nó có thể là lý do chính bạn được gọi.
+Phân tích tình huống của tài nguyên '{resource_name}' (Loại: {resource_type}) trong môi trường '{environment_name}' (Loại: {environment_type}).
+**Ưu tiên xem xét Ngữ cảnh Môi trường** được cung cấp dưới đây vì nó có thể chứa lý do chính.
 Kết hợp với các dòng log sau đây (nếu có) để đưa ra phân tích đầy đủ.
 
 **Lý do ban đầu được phát hiện (Initial Reasons):** {initial_reasons}
@@ -32,9 +30,9 @@ Kết hợp với các dòng log sau đây (nếu có) để đưa ra phân tíc
     b. Đề xuất **nguyên nhân gốc có thể xảy ra** (potential root causes) (ngắn gọn, dạng gạch đầu dòng nếu có nhiều).
     c. Đề xuất các **bước khắc phục sự cố** (suggested troubleshooting steps) (ngắn gọn, dạng gạch đầu dòng).
 
-Ngữ cảnh Kubernetes:
+Ngữ cảnh Môi trường:
 --- START CONTEXT ---
-{k8s_context}
+{environment_context}
 --- END CONTEXT ---
 
 Các dòng log (có thể không có):
@@ -55,9 +53,21 @@ DEFAULT_ENABLE_TELEGRAM_ALERTS = False
 DEFAULT_ALERT_SEVERITY_LEVELS_STR = "WARNING,ERROR,CRITICAL"
 DEFAULT_ALERT_COOLDOWN_MINUTES = 30
 DEFAULT_STATS_UPDATE_INTERVAL_SECONDS = 300
-DEFAULT_SCAN_INTERVAL_SECONDS = 30
+DEFAULT_SCAN_INTERVAL_SECONDS = 60 # Default chung cho các agent
+# Các default khác cho từng loại agent (K8s, Linux, Loki)
 DEFAULT_RESTART_COUNT_THRESHOLD = 5
 DEFAULT_LOKI_SCAN_MIN_LEVEL = "INFO"
+DEFAULT_CPU_THRESHOLD = 90.0
+DEFAULT_MEM_THRESHOLD = 90.0
+DEFAULT_DISK_THRESHOLDS = {'/': 90.0}
+DEFAULT_MONITORED_SERVICES = []
+DEFAULT_MONITORED_LOGS = []
+DEFAULT_LOKI_URL = ''
+DEFAULT_LOGQL_QUERIES = []
+DEFAULT_LOG_SCAN_RANGE_MINUTES = 5
+DEFAULT_LOG_CONTEXT_MINUTES = 30
+DEFAULT_LOKI_QUERY_LIMIT = 500
+
 
 _current_obsengine_config = {}
 _last_config_refresh_time = 0
@@ -97,20 +107,21 @@ def get_config(force_refresh=False):
         processed_config = {}
         processed_config['db_path'] = db_path_for_load
 
-        # Ưu tiên giá trị từ DB, sau đó mới đến default trong code
         enable_ai_db = config_from_db.get('enable_ai_analysis', str(DEFAULT_ENABLE_AI_ANALYSIS)).lower()
         processed_config['enable_ai_analysis'] = enable_ai_db == 'true'
         processed_config['ai_provider'] = config_from_db.get('ai_provider', DEFAULT_AI_PROVIDER).lower()
         processed_config['ai_model_identifier'] = config_from_db.get('ai_model_identifier', DEFAULT_AI_MODEL_IDENTIFIER)
+        # --- Đọc local_gemini_endpoint từ DB, fallback về default ---
         processed_config['local_gemini_endpoint'] = config_from_db.get('local_gemini_endpoint', DEFAULT_LOCAL_GEMINI_ENDPOINT)
-        processed_config['ai_api_key'] = gemini_api_key_env or config_from_db.get('ai_api_key', '')
+        # ----------------------------------------------------------
+        processed_config['ai_api_key'] = gemini_api_key_env or '' # API Key chỉ lấy từ ENV
 
         processed_config['prompt_template'] = config_from_db.get('prompt_template', DEFAULT_PROMPT_TEMPLATE)
 
         enable_telegram_db = config_from_db.get('enable_telegram_alerts', str(DEFAULT_ENABLE_TELEGRAM_ALERTS)).lower()
         processed_config['enable_telegram_alerts'] = enable_telegram_db == 'true'
-        processed_config['telegram_bot_token'] = telegram_bot_token_env or config_from_db.get('telegram_bot_token', '')
-        processed_config['telegram_chat_id'] = telegram_chat_id_env or config_from_db.get('telegram_chat_id', '')
+        processed_config['telegram_bot_token'] = telegram_bot_token_env or '' # Token chỉ lấy từ ENV
+        processed_config['telegram_chat_id'] = telegram_chat_id_env or config_from_db.get('telegram_chat_id', '') # Chat ID có thể từ DB hoặc ENV
 
         alert_levels_str = config_from_db.get('alert_severity_levels', DEFAULT_ALERT_SEVERITY_LEVELS_STR)
         processed_config['alert_severity_levels_str'] = alert_levels_str
@@ -130,26 +141,32 @@ def get_config(force_refresh=False):
              logging.warning(f"Invalid STATS_UPDATE_INTERVAL_SECONDS value. Using default: {DEFAULT_STATS_UPDATE_INTERVAL_SECONDS}")
              processed_config['stats_update_interval_seconds'] = DEFAULT_STATS_UPDATE_INTERVAL_SECONDS
 
-        processed_config['default_scan_interval_seconds'] = DEFAULT_SCAN_INTERVAL_SECONDS
-        processed_config['default_restart_count_threshold'] = DEFAULT_RESTART_COUNT_THRESHOLD
-        processed_config['default_loki_scan_min_level'] = DEFAULT_LOKI_SCAN_MIN_LEVEL
-        processed_config['default_monitored_namespaces_str'] = DEFAULT_MONITORED_NAMESPACES_STR
+        # --- Load các default cho agent (để dùng khi get_agent_config) ---
+        processed_config['default_scan_interval_seconds'] = config_from_db.get('default_scan_interval_seconds', str(DEFAULT_SCAN_INTERVAL_SECONDS))
+        # K8s defaults
+        processed_config['default_monitored_namespaces_str'] = config_from_db.get('default_monitored_namespaces', json.dumps(DEFAULT_MONITORED_NAMESPACES_STR.split(','))) # Lưu dạng JSON string trong DB
+        processed_config['default_restart_count_threshold'] = config_from_db.get('default_restart_count_threshold', str(DEFAULT_RESTART_COUNT_THRESHOLD))
+        processed_config['default_loki_scan_min_level'] = config_from_db.get('default_loki_scan_min_level', DEFAULT_LOKI_SCAN_MIN_LEVEL)
+        # Linux defaults
+        processed_config['default_cpu_threshold_percent'] = config_from_db.get('default_cpu_threshold_percent', str(DEFAULT_CPU_THRESHOLD))
+        processed_config['default_mem_threshold_percent'] = config_from_db.get('default_mem_threshold_percent', str(DEFAULT_MEM_THRESHOLD))
+        processed_config['default_disk_thresholds'] = config_from_db.get('default_disk_thresholds', json.dumps(DEFAULT_DISK_THRESHOLDS))
+        processed_config['default_monitored_services'] = config_from_db.get('default_monitored_services', json.dumps(DEFAULT_MONITORED_SERVICES))
+        processed_config['default_monitored_logs'] = config_from_db.get('default_monitored_logs', json.dumps(DEFAULT_MONITORED_LOGS))
+        # Loki defaults
+        processed_config['default_loki_url'] = config_from_db.get('default_loki_url', DEFAULT_LOKI_URL)
+        processed_config['default_logql_queries'] = config_from_db.get('default_logql_queries', json.dumps(DEFAULT_LOGQL_QUERIES))
+        processed_config['default_log_scan_range_minutes'] = config_from_db.get('default_log_scan_range_minutes', str(DEFAULT_LOG_SCAN_RANGE_MINUTES))
+        processed_config['default_loki_query_limit'] = config_from_db.get('default_loki_query_limit', str(DEFAULT_LOKI_QUERY_LIMIT))
+        # -------------------------------------------------------------------
 
         _current_obsengine_config = processed_config
         _last_config_refresh_time = now
         logging.info("[Config Manager - ObsEngine] Configuration refreshed/loaded.")
-        logging.debug(f"[Config Manager - ObsEngine] Current Config (Secrets Masked): "
-                      f"DB={processed_config.get('db_path')}, "
-                      f"AI Enabled={processed_config.get('enable_ai_analysis')}, " # Log giá trị đã xử lý
-                      f"Provider={processed_config.get('ai_provider')}, "
-                      f"Model={processed_config.get('ai_model_identifier')}, "
-                      f"Local Endpoint={processed_config.get('local_gemini_endpoint')}, "
-                      f"AI Key Set={'Yes' if processed_config.get('ai_api_key') else 'No'}, "
-                      f"Telegram Enabled={processed_config.get('enable_telegram_alerts')}, "
-                      f"TG Token Set={'Yes' if processed_config.get('telegram_bot_token') else 'No'}, "
-                      f"TG Chat ID Set={'Yes' if processed_config.get('telegram_chat_id') else 'No'}, "
-                      f"Alert Levels={processed_config.get('alert_severity_levels')}, "
-                      f"Cooldown={processed_config.get('alert_cooldown_minutes')}m")
+        # Log config debug (ẩn key và token)
+        log_config_debug = {k: ('********' if k in ['ai_api_key', 'telegram_bot_token'] else v) for k, v in processed_config.items()}
+        logging.debug(f"[Config Manager - ObsEngine] Current Config (Secrets Masked): {log_config_debug}")
+
 
     return _current_obsengine_config.copy()
 
@@ -163,8 +180,8 @@ def get_ai_config():
         'enable_ai_analysis': config.get('enable_ai_analysis', DEFAULT_ENABLE_AI_ANALYSIS),
         'ai_provider': config.get('ai_provider', DEFAULT_AI_PROVIDER),
         'ai_model_identifier': config.get('ai_model_identifier', DEFAULT_AI_MODEL_IDENTIFIER),
-        'local_gemini_endpoint': config.get('local_gemini_endpoint', DEFAULT_LOCAL_GEMINI_ENDPOINT),
-        'ai_api_key': config.get('ai_api_key', ''),
+        'local_gemini_endpoint': config.get('local_gemini_endpoint', DEFAULT_LOCAL_GEMINI_ENDPOINT), # Trả về endpoint đã load
+        'ai_api_key': config.get('ai_api_key', ''), # Lấy từ ENV (đã xử lý trong get_config)
         'prompt_template': config.get('prompt_template', DEFAULT_PROMPT_TEMPLATE)
     }
 
@@ -172,21 +189,47 @@ def get_alert_config():
     config = get_config()
     return {
         'enable_telegram_alerts': config.get('enable_telegram_alerts', DEFAULT_ENABLE_TELEGRAM_ALERTS),
-        'telegram_bot_token': config.get('telegram_bot_token', ''),
-        'telegram_chat_id': config.get('telegram_chat_id', ''),
+        'telegram_bot_token': config.get('telegram_bot_token', ''), # Lấy từ ENV
+        'telegram_chat_id': config.get('telegram_chat_id', ''), # Lấy từ ENV hoặc DB
         'alert_severity_levels': config.get('alert_severity_levels', []),
         'alert_cooldown_minutes': config.get('alert_cooldown_minutes', DEFAULT_ALERT_COOLDOWN_MINUTES)
     }
 
 def get_stats_update_interval():
      config = get_config()
+     # Đọc giá trị đã được chuyển thành int trong get_config
      return config.get('stats_update_interval_seconds', DEFAULT_STATS_UPDATE_INTERVAL_SECONDS)
 
 def get_agent_defaults():
+    """Lấy các giá trị default global cho agent config."""
     config = get_config()
-    return {
-        'scan_interval_seconds': config.get('default_scan_interval_seconds', DEFAULT_SCAN_INTERVAL_SECONDS),
-        'restart_count_threshold': config.get('default_restart_count_threshold', DEFAULT_RESTART_COUNT_THRESHOLD),
+    # Trả về các giá trị default đã được load từ DB hoặc code defaults
+    # Cần parse lại JSON string cho các list/dict
+    defaults = {
+        'scan_interval_seconds': int(config.get('default_scan_interval_seconds', DEFAULT_SCAN_INTERVAL_SECONDS)),
+        # K8s
+        'restart_count_threshold': int(config.get('default_restart_count_threshold', DEFAULT_RESTART_COUNT_THRESHOLD)),
         'loki_scan_min_level': config.get('default_loki_scan_min_level', DEFAULT_LOKI_SCAN_MIN_LEVEL),
-        'monitored_namespaces': [ns.strip() for ns in config.get('default_monitored_namespaces_str', DEFAULT_MONITORED_NAMESPACES_STR).split(',') if ns.strip()]
+        'monitored_namespaces': json.loads(config.get('default_monitored_namespaces_str', '[]')),
+        # Linux
+        'cpu_threshold_percent': float(config.get('default_cpu_threshold_percent', DEFAULT_CPU_THRESHOLD)),
+        'mem_threshold_percent': float(config.get('default_mem_threshold_percent', DEFAULT_MEM_THRESHOLD)),
+        'disk_thresholds': json.loads(config.get('default_disk_thresholds', '{}')),
+        'monitored_services': json.loads(config.get('default_monitored_services', '[]')),
+        'monitored_logs': json.loads(config.get('default_monitored_logs', '[]')),
+        # Loki
+        'loki_url': config.get('default_loki_url', DEFAULT_LOKI_URL),
+        'logql_queries': json.loads(config.get('default_logql_queries', '[]')),
+        'log_scan_range_minutes': int(config.get('default_log_scan_range_minutes', DEFAULT_LOG_SCAN_RANGE_MINUTES)),
+        'loki_query_limit': int(config.get('default_loki_query_limit', DEFAULT_LOKI_QUERY_LIMIT)),
+        # Chung
+        'log_context_minutes': int(config.get('default_log_context_minutes', DEFAULT_LOG_CONTEXT_MINUTES))
     }
+    # Xử lý lỗi parse JSON nếu có
+    for key in ['monitored_namespaces', 'disk_thresholds', 'monitored_services', 'monitored_logs', 'logql_queries']:
+        if not isinstance(defaults[key], (list, dict)):
+            logging.warning(f"Failed to parse default JSON for '{key}'. Using empty default.")
+            defaults[key] = [] if key != 'disk_thresholds' else {}
+
+    return defaults
+

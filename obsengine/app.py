@@ -64,34 +64,33 @@ except Exception as e:
 
 def get_initial_global_db_defaults():
      logger.debug("Getting initial GLOBAL DB defaults...")
-     # Thêm các default cho agent nếu cần (ví dụ: default loki_url)
      defaults = {
          'enable_telegram_alerts': str(getattr(obsengine_config, 'DEFAULT_ENABLE_TELEGRAM_ALERTS', False)).lower(),
          'telegram_chat_id': getattr(obsengine_config, 'DEFAULT_TELEGRAM_CHAT_ID', ''),
          'enable_ai_analysis': str(getattr(obsengine_config, 'DEFAULT_ENABLE_AI_ANALYSIS', False)).lower(),
          'ai_provider': getattr(obsengine_config, 'DEFAULT_AI_PROVIDER', 'gemini').lower(),
          'ai_model_identifier': getattr(obsengine_config, 'DEFAULT_AI_MODEL_IDENTIFIER', 'gemini-1.5-flash'),
-         'local_gemini_endpoint': getattr(obsengine_config, 'DEFAULT_LOCAL_GEMINI_ENDPOINT', ''),
+         'local_gemini_endpoint': getattr(obsengine_config, 'DEFAULT_LOCAL_GEMINI_ENDPOINT', ''), # Thêm default endpoint
          'prompt_template': getattr(obsengine_config, 'DEFAULT_PROMPT_TEMPLATE', "Default Prompt Missing"),
          'alert_severity_levels': getattr(obsengine_config, 'DEFAULT_ALERT_SEVERITY_LEVELS_STR', "WARNING,ERROR,CRITICAL"),
          'alert_cooldown_minutes': str(getattr(obsengine_config, 'DEFAULT_ALERT_COOLDOWN_MINUTES', 30)),
-         # Defaults cho K8s Agent
+         'default_scan_interval_seconds': str(getattr(obsengine_config, 'DEFAULT_SCAN_INTERVAL_SECONDS', 60)),
+         # K8s
          'default_monitored_namespaces': json.dumps(getattr(obsengine_config, 'DEFAULT_MONITORED_NAMESPACES_STR', "kube-system,default").split(',')),
          'default_restart_count_threshold': str(getattr(obsengine_config, 'DEFAULT_RESTART_COUNT_THRESHOLD', 5)),
          'default_loki_scan_min_level': getattr(obsengine_config, 'DEFAULT_LOKI_SCAN_MIN_LEVEL', 'INFO'),
-         # Defaults cho Linux Agent (ví dụ)
+         # Linux
          'default_cpu_threshold_percent': str(getattr(obsengine_config, 'DEFAULT_CPU_THRESHOLD', 90.0)),
          'default_mem_threshold_percent': str(getattr(obsengine_config, 'DEFAULT_MEM_THRESHOLD', 90.0)),
          'default_disk_thresholds': json.dumps(getattr(obsengine_config, 'DEFAULT_DISK_THRESHOLDS', {'/': 90.0})),
          'default_monitored_services': json.dumps(getattr(obsengine_config, 'DEFAULT_MONITORED_SERVICES', [])),
          'default_monitored_logs': json.dumps(getattr(obsengine_config, 'DEFAULT_MONITORED_LOGS', [])),
-         # Defaults cho Loki Agent (ví dụ)
+         # Loki
          'default_loki_url': getattr(obsengine_config, 'DEFAULT_LOKI_URL', ''),
          'default_logql_queries': json.dumps(getattr(obsengine_config, 'DEFAULT_LOGQL_QUERIES', [])),
          'default_log_scan_range_minutes': str(getattr(obsengine_config, 'DEFAULT_LOG_SCAN_RANGE_MINUTES', 5)),
          'default_loki_query_limit': str(getattr(obsengine_config, 'DEFAULT_LOKI_QUERY_LIMIT', 500)),
-         # Default chung
-         'default_scan_interval_seconds': str(getattr(obsengine_config, 'DEFAULT_SCAN_INTERVAL_SECONDS', 60)),
+         'default_log_context_minutes': str(getattr(obsengine_config, 'DEFAULT_LOG_CONTEXT_MINUTES', 30)),
      }
      logger.debug(f"Initial GLOBAL DB defaults generated.")
      return defaults
@@ -211,7 +210,6 @@ def collect_data():
     except Exception as heartbeat_err:
         logger.error(f"Failed to update heartbeat/info for agent {agent_id}: {heartbeat_err}", exc_info=True)
 
-    # --- Chỉ thực hiện phân tích và ghi incident nếu không phải là heartbeat ---
     is_heartbeat = isinstance(initial_reasons, list) and len(initial_reasons) == 1 and initial_reasons[0] == "Heartbeat"
 
     if not is_heartbeat:
@@ -319,7 +317,6 @@ def collect_data():
             logger.error(f"--- Error processing data for resource {resource_identifier} from Agent {agent_id}: {e} ---", exc_info=True)
             return jsonify({"error": f"Internal server error processing data for {resource_identifier}"}), 500
     else:
-        # Chỉ là heartbeat, không làm gì thêm
         logger.info(f"--- Received heartbeat from Agent {agent_id} for {environment_name} ---")
         return jsonify({"message": "Heartbeat received"}), 200
 
@@ -436,11 +433,9 @@ def get_all_config_api():
     logger.info("--- GET /api/config/all endpoint hit ---")
     try:
         current_config = db_manager.load_all_global_config(DB_PATH)
-        # Lấy key nhạy cảm từ env để biết chúng có được set không
         has_ai_key = bool(obsengine_config._get_env_var("GEMINI_API_KEY"))
         has_tg_token = bool(obsengine_config._get_env_var("TELEGRAM_BOT_TOKEN"))
 
-        # Không trả về giá trị key/token thực tế
         safe_config = {k: v for k, v in current_config.items() if k not in ['ai_api_key', 'telegram_bot_token']}
         safe_config['has_api_key'] = has_ai_key
         safe_config['has_token'] = has_tg_token
@@ -495,25 +490,68 @@ def get_available_namespaces_api():
         if conn:
             conn.close()
 
+# --- Cập nhật API lưu config AI ---
 @app.route('/api/config/ai', methods=['POST'])
 def save_global_ai_config_api():
     logger.info("--- POST /api/config/ai (Global) endpoint hit ---")
     if not request.is_json: return jsonify({"error": "Request must be JSON"}), 400
-    data = request.get_json(); logger.debug(f"Received global AI config data: {data}")
-    config_to_save = {}; validation_errors = []; valid_providers = ['gemini', 'local', 'openai', 'groq', 'deepseek', 'none']
-    enable_ai = data.get('enable_ai_analysis');
-    if not isinstance(enable_ai, bool): validation_errors.append("'enable_ai_analysis' must be a boolean")
-    else: config_to_save['enable_ai_analysis'] = str(enable_ai).lower()
-    provider = data.get('ai_provider', obsengine_config.DEFAULT_AI_PROVIDER).lower();
-    if provider not in valid_providers: validation_errors.append(f"Invalid AI provider: {provider}")
-    else: config_to_save['ai_provider'] = provider
-    model_id = data.get('ai_model_identifier', ''); config_to_save['ai_model_identifier'] = model_id.strip();
-    # Không lưu API key vào DB từ API này, chỉ quản lý qua ENV
-    # if 'ai_api_key' in data: logger.warning("API key provided via API, but it won't be saved to DB. Use ENV var.")
-    if validation_errors: logger.error(f"Validation failed for global AI config: {validation_errors}"); return jsonify({"error": "Validation failed", "details": validation_errors}), 400
-    success, message = db_manager.save_global_config(DB_PATH, config_to_save);
-    if success: obsengine_config._last_config_refresh_time = 0; return jsonify({"message": message}), 200
-    else: return jsonify({"error": message}), 500
+    data = request.get_json()
+    logger.debug(f"Received global AI config data: {data}")
+    config_to_save = {}
+    validation_errors = []
+    valid_providers = ['gemini', 'local'] # Chỉ cho phép các provider đã hỗ trợ
+
+    enable_ai = data.get('enable_ai_analysis')
+    if not isinstance(enable_ai, bool):
+        validation_errors.append("'enable_ai_analysis' must be a boolean")
+    else:
+        config_to_save['enable_ai_analysis'] = str(enable_ai).lower()
+
+    provider = data.get('ai_provider', 'gemini').lower() # Mặc định là gemini nếu không có
+    if provider not in valid_providers:
+        validation_errors.append(f"Invalid AI provider: {provider}. Supported: {', '.join(valid_providers)}")
+    else:
+        config_to_save['ai_provider'] = provider
+
+    # Chỉ yêu cầu model_id nếu provider không phải là 'local'
+    if provider != 'local':
+        model_id = data.get('ai_model_identifier', '').strip()
+        if not model_id:
+            validation_errors.append("Model Identifier is required for non-local providers.")
+        else:
+            config_to_save['ai_model_identifier'] = model_id
+    else:
+        # Nếu là local, xóa model_id cũ nếu có trong DB (hoặc bỏ qua)
+        config_to_save['ai_model_identifier'] = None # Đặt là None để có thể xóa key cũ nếu cần
+
+    # Xử lý local_gemini_endpoint nếu provider là 'local'
+    if provider == 'local':
+        local_endpoint = data.get('local_gemini_endpoint', '').strip()
+        if not local_endpoint:
+            validation_errors.append("Local Model Endpoint URL is required for 'local' provider.")
+        # Thêm validation URL cơ bản nếu muốn
+        elif not local_endpoint.startswith(('http://', 'https://')):
+             validation_errors.append("Invalid Local Model Endpoint URL format.")
+        else:
+            config_to_save['local_gemini_endpoint'] = local_endpoint
+    else:
+        # Nếu không phải local, xóa endpoint cũ nếu có trong DB
+         config_to_save['local_gemini_endpoint'] = None
+
+    # Không xử lý ai_api_key ở đây, nó được quản lý qua ENV
+
+    if validation_errors:
+        logger.error(f"Validation failed for global AI config: {validation_errors}")
+        return jsonify({"error": "Validation failed", "details": validation_errors}), 400
+
+    # Lưu các giá trị hợp lệ (bao gồm cả None để xóa key cũ nếu cần)
+    success, message = db_manager.save_global_config(DB_PATH, config_to_save)
+    if success:
+        obsengine_config._last_config_refresh_time = 0 # Trigger refresh config cache
+        return jsonify({"message": message}), 200
+    else:
+        return jsonify({"error": message}), 500
+# ------------------------------------
 
 @app.route('/api/config/telegram', methods=['POST'])
 def save_global_telegram_config_api():
@@ -527,54 +565,28 @@ def save_global_telegram_config_api():
     chat_id = data.get('telegram_chat_id', '').strip();
     if not chat_id: validation_errors.append("Telegram Chat ID cannot be empty")
     else: config_to_save['telegram_chat_id'] = chat_id
-    # Không lưu Bot Token vào DB từ API này, chỉ quản lý qua ENV
-    # if 'telegram_bot_token' in data: logger.warning("Bot token provided via API, but it won't be saved to DB. Use ENV var.")
     if validation_errors: logger.error(f"Validation failed for global Telegram config: {validation_errors}"); return jsonify({"error": "Validation failed", "details": validation_errors}), 400
     success, message = db_manager.save_global_config(DB_PATH, config_to_save);
     if success: obsengine_config._last_config_refresh_time = 0; return jsonify({"message": message}), 200
     else: return jsonify({"error": message}), 500
 
-# --- Cập nhật API lấy config Agent ---
 @app.route('/api/agents/<agent_id>/config', methods=['GET'])
 def get_agent_config_api(agent_id):
     logger.info(f"--- GET /api/agents/{agent_id}/config endpoint hit ---")
     if not agent_id: return jsonify({"error": "Agent ID is required"}), 400
     try:
-        global_config = db_manager.load_all_global_config(DB_PATH)
+        global_config_raw = db_manager.load_all_global_config(DB_PATH)
+        # Lấy các default đã được xử lý từ obsengine_config
+        agent_defaults = obsengine_config.get_agent_defaults()
+
         agent_overrides = db_manager.load_agent_config(DB_PATH, agent_id)
         agent_info = db_manager.get_agent_info(DB_PATH, agent_id)
         agent_type = agent_info.get('environment_type', 'unknown') if agent_info else 'unknown'
 
-        # Bắt đầu với default global
-        merged_config = {
-            'scan_interval_seconds': int(global_config.get('default_scan_interval_seconds', 60)),
-            'environment_type': agent_type,
-            'environment_info': agent_info.get('environment_info', {}) if agent_info else {}
-        }
-
-        # Thêm default theo loại agent
-        if agent_type == 'kubernetes':
-            merged_config['restart_count_threshold'] = int(global_config.get('default_restart_count_threshold', 5))
-            merged_config['loki_scan_min_level'] = global_config.get('default_loki_scan_min_level', 'INFO')
-            try: merged_config['monitored_namespaces'] = json.loads(global_config.get('default_monitored_namespaces', '[]'))
-            except json.JSONDecodeError: merged_config['monitored_namespaces'] = []
-        elif agent_type == 'linux':
-            merged_config['cpu_threshold_percent'] = float(global_config.get('default_cpu_threshold_percent', 90.0))
-            merged_config['mem_threshold_percent'] = float(global_config.get('default_mem_threshold_percent', 90.0))
-            try: merged_config['disk_thresholds'] = json.loads(global_config.get('default_disk_thresholds', '{}'))
-            except json.JSONDecodeError: merged_config['disk_thresholds'] = {}
-            try: merged_config['monitored_services'] = json.loads(global_config.get('default_monitored_services', '[]'))
-            except json.JSONDecodeError: merged_config['monitored_services'] = []
-            try: merged_config['monitored_logs'] = json.loads(global_config.get('default_monitored_logs', '[]'))
-            except json.JSONDecodeError: merged_config['monitored_logs'] = []
-            merged_config['log_scan_range_minutes'] = int(global_config.get('default_log_scan_range_minutes', 5)) # Dùng chung key với loki
-            merged_config['log_context_minutes'] = int(global_config.get('default_log_context_minutes', 30)) # Dùng chung key với loki
-        elif agent_type == 'loki_source':
-             merged_config['loki_url'] = global_config.get('default_loki_url', '')
-             try: merged_config['logql_queries'] = json.loads(global_config.get('default_logql_queries', '[]'))
-             except json.JSONDecodeError: merged_config['logql_queries'] = []
-             merged_config['log_scan_range_minutes'] = int(global_config.get('default_log_scan_range_minutes', 5))
-             merged_config['loki_query_limit'] = int(global_config.get('default_loki_query_limit', 500))
+        # Bắt đầu với default global đã xử lý
+        merged_config = agent_defaults.copy()
+        merged_config['environment_type'] = agent_type
+        merged_config['environment_info'] = agent_info.get('environment_info', {}) if agent_info else {}
 
         # Ghi đè bằng config cụ thể của agent
         for key, value in agent_overrides.items():
@@ -584,17 +596,17 @@ def get_agent_config_api(agent_id):
                      merged_config[key] = int(value)
                  elif key in ['cpu_threshold_percent', 'mem_threshold_percent']:
                       merged_config[key] = float(value)
-                 elif key in ['monitored_namespaces', 'monitored_services', 'monitored_logs', 'logql_queries']:
+                 elif key in ['monitored_namespaces', 'monitored_services', 'monitored_logs', 'logql_queries', 'log_scan_keywords']: # Thêm keywords
                       parsed_list = json.loads(value)
                       if isinstance(parsed_list, list): merged_config[key] = parsed_list
                  elif key == 'disk_thresholds':
                       parsed_dict = json.loads(value)
                       if isinstance(parsed_dict, dict): merged_config[key] = parsed_dict
-                 else: # Giữ các config khác dạng string (ví dụ: loki_url, loki_scan_min_level)
+                 else:
                      merged_config[key] = value
              except (ValueError, TypeError, json.JSONDecodeError) as parse_err:
                   logger.warning(f"Error parsing agent config key '{key}' for agent {agent_id}: {parse_err}. Value: '{value}'")
-                  merged_config[key] = value # Giữ giá trị gốc nếu parse lỗi
+                  merged_config[key] = value
 
         logger.info(f"Returning merged configuration for agent {agent_id} (Type: {agent_type}).")
         return jsonify(merged_config), 200
@@ -602,7 +614,6 @@ def get_agent_config_api(agent_id):
         logger.error(f"Error getting config for agent {agent_id}: {e}", exc_info=True)
         return jsonify({"error": f"Failed to retrieve configuration for agent {agent_id}"}), 500
 
-# --- Cập nhật API lưu config Agent General ---
 @app.route('/api/agents/<agent_id>/config/general', methods=['POST'])
 def save_agent_general_config_api(agent_id):
     logger.info(f"--- POST /api/agents/{agent_id}/config/general endpoint hit ---")
@@ -613,17 +624,16 @@ def save_agent_general_config_api(agent_id):
     logger.debug(f"Received config data for agent {agent_id}: {data}")
     config_to_save = {}; validation_errors = [];
 
-    # Lấy thông tin agent để biết loại
     agent_info = db_manager.get_agent_info(DB_PATH, agent_id)
     agent_type = agent_info.get('environment_type', 'unknown') if agent_info else 'unknown'
     logger.info(f"Saving config for agent {agent_id} of type {agent_type}")
 
-    # --- Xử lý các trường chung ---
+    # --- Xử lý Scan Interval (chung cho mọi agent) ---
     try:
         if 'scan_interval_seconds' in data:
             scan_interval = int(data['scan_interval_seconds']);
             if scan_interval < 10: validation_errors.append("Scan interval must be >= 10")
-            else: config_to_save['scan_interval_seconds'] = str(scan_interval)
+            else: config_to_save['scan_interval_seconds'] = scan_interval # Lưu dạng số
     except (ValueError, TypeError): validation_errors.append("Invalid scan_interval_seconds")
 
     # --- Xử lý các trường theo loại agent ---
@@ -637,25 +647,25 @@ def save_agent_general_config_api(agent_id):
             if 'restart_count_threshold' in data:
                 restart_threshold = int(data['restart_count_threshold']);
                 if restart_threshold < 1: validation_errors.append("Restart threshold must be >= 1")
-                else: config_to_save['restart_count_threshold'] = str(restart_threshold)
+                else: config_to_save['restart_count_threshold'] = restart_threshold # Lưu dạng số
         except (ValueError, TypeError): validation_errors.append("Invalid restart_count_threshold")
 
     elif agent_type == 'linux':
         try:
             if 'cpu_threshold_percent' in data: config_to_save['cpu_threshold_percent'] = float(data['cpu_threshold_percent'])
             if 'mem_threshold_percent' in data: config_to_save['mem_threshold_percent'] = float(data['mem_threshold_percent'])
-            if 'disk_thresholds' in data: # Frontend gửi object
-                 if not isinstance(data['disk_thresholds'], dict): validation_errors.append("disk_thresholds must be a JSON object")
-                 else: config_to_save['disk_thresholds'] = data['disk_thresholds'] # Lưu trực tiếp object, db_manager sẽ dumps
-            if 'monitored_services' in data: # Frontend gửi list
+            if 'disk_thresholds' in data:
+                 if not isinstance(data['disk_thresholds'], dict): validation_errors.append("disk_thresholds must be an object")
+                 else: config_to_save['disk_thresholds'] = data['disk_thresholds'] # Lưu object
+            if 'monitored_services' in data:
                  if not isinstance(data['monitored_services'], list): validation_errors.append("monitored_services must be a list")
-                 else: config_to_save['monitored_services'] = data['monitored_services']
-            if 'monitored_logs' in data: # Frontend gửi list of objects
+                 else: config_to_save['monitored_services'] = data['monitored_services'] # Lưu list
+            if 'monitored_logs' in data:
                  if not isinstance(data['monitored_logs'], list): validation_errors.append("monitored_logs must be a list")
-                 else: config_to_save['monitored_logs'] = data['monitored_logs']
-            if 'log_scan_keywords' in data: # Frontend gửi list
+                 else: config_to_save['monitored_logs'] = data['monitored_logs'] # Lưu list object
+            if 'log_scan_keywords' in data:
                  if not isinstance(data['log_scan_keywords'], list): validation_errors.append("log_scan_keywords must be a list")
-                 else: config_to_save['log_scan_keywords'] = data['log_scan_keywords']
+                 else: config_to_save['log_scan_keywords'] = data['log_scan_keywords'] # Lưu list
             if 'log_scan_range_minutes' in data: config_to_save['log_scan_range_minutes'] = int(data['log_scan_range_minutes'])
             if 'log_context_minutes' in data: config_to_save['log_context_minutes'] = int(data['log_context_minutes'])
         except (ValueError, TypeError) as e: validation_errors.append(f"Invalid data type for Linux config: {e}")
@@ -664,22 +674,18 @@ def save_agent_general_config_api(agent_id):
          if 'loki_url' in data:
              loki_url = data['loki_url'].strip()
              if not loki_url: validation_errors.append("Loki URL cannot be empty")
-             # Basic URL validation (can be improved)
              elif not loki_url.startswith(('http://', 'https://')): validation_errors.append("Invalid Loki URL format")
              else: config_to_save['loki_url'] = loki_url
          if 'logql_queries' in data:
              queries = data['logql_queries']
              if not isinstance(queries, list): validation_errors.append("logql_queries must be a list")
-             # Validate individual query objects (basic)
              elif not all(isinstance(q, dict) and q.get("query") for q in queries):
                   validation_errors.append("Each item in logql_queries must be an object with a 'query' key")
-             else: config_to_save['logql_queries'] = queries # Lưu list object, db_manager sẽ dumps
+             else: config_to_save['logql_queries'] = queries # Lưu list object
          try:
              if 'log_scan_range_minutes' in data: config_to_save['log_scan_range_minutes'] = int(data['log_scan_range_minutes'])
              if 'loki_query_limit' in data: config_to_save['loki_query_limit'] = int(data['loki_query_limit'])
          except (ValueError, TypeError): validation_errors.append("Invalid numeric value for Loki config")
-
-    # --- Kết thúc xử lý theo loại agent ---
 
     if validation_errors:
         logger.error(f"Validation failed for agent {agent_id} config: {validation_errors}")
@@ -688,15 +694,12 @@ def save_agent_general_config_api(agent_id):
     if not config_to_save:
         return jsonify({"message": "No settings provided to save."}), 200
 
-    # Gọi db_manager để lưu (nó sẽ xử lý JSON dumps cho list/dict)
     success, message = db_manager.save_agent_config(DB_PATH, agent_id, config_to_save)
     if success:
-        # Không cần refresh config ở đây, agent sẽ tự lấy lại
         return jsonify({"message": message}), 200
     else:
         return jsonify({"error": message}), 500
 
-# --- API lưu Namespaces (Chỉ cho K8s) ---
 @app.route('/api/agents/<agent_id>/config/namespaces', methods=['POST'])
 def save_agent_namespaces_api(agent_id):
     agent_info = db_manager.get_agent_info(DB_PATH, agent_id)
