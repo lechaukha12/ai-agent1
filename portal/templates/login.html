@@ -5,121 +5,188 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Đăng nhập - Obs Engine</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;700&display=swap" rel="stylesheet">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         body {
-            font-family: 'Inter', sans-serif;
-            /* Animated Gradient Background */
-            background: linear-gradient(-45deg, #ee7752, #e73c7e, #23a6d5, #23d5ab);
-            background-size: 400% 400%;
-            animation: gradientBG 15s ease infinite;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
+            font-family: 'Poppins', sans-serif;
+            background: radial-gradient(circle at top left, #ff6ec4, #7873f5, #4ecdc4);
+            background-size: 200% 200%;
+            animation: moveBG 10s ease infinite;
+            height: 100vh;
+            overflow: hidden; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
         }
 
-        @keyframes gradientBG {
+        @keyframes moveBG {
             0% { background-position: 0% 50%; }
             50% { background-position: 100% 50%; }
             100% { background-position: 0% 50%; }
         }
 
-        /* Form Styling */
-        .login-card {
-            background-color: rgba(255, 255, 255, 0.9); /* Slightly transparent white */
-            backdrop-filter: blur(10px);
-            border-radius: 1rem; /* More rounded */
-            padding: 2.5rem;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-            width: 100%;
-            max-width: 26rem; /* Slightly wider */
+        .glass-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px); 
+            border-radius: 25px;
             border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+            width: 100%;
+            max-width: 26rem; 
             transition: transform 0.3s ease, box-shadow 0.3s ease;
         }
-        .login-card:hover {
+        .glass-card:hover {
              transform: translateY(-5px);
              box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
         }
 
-        .form-input {
-            transition: all 0.3s ease;
-            border-radius: 0.5rem;
-            border: 1px solid #d1d5db; /* gray-300 */
-            background-color: #fff;
-            color: #1f2937; /* gray-800 */
-            padding: 0.625rem 1rem; /* py-2.5 px-4 */
+
+        .glow-input {
+            border-radius: 0.75rem; 
+            background-color: rgba(255, 255, 255, 0.1);
+            color: white;
+            padding: 0.75rem; 
+            outline: none;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            width: 100%;
         }
-        .form-input::placeholder {
-             color: #9ca3af; /* gray-400 */
+        .glow-input::placeholder {
+            color: rgba(255, 255, 255, 0.6);
         }
-        .form-input:focus {
-            transform: scale(1.02); /* Slightly enlarge on focus */
-            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.5); /* Blue ring */
-             border-color: #3b82f6; /* blue-500 */
+        .glow-input:focus {
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+            transform: scale(1.02);
         }
 
-        .submit-button {
-            background: linear-gradient(to right, #4f46e5, #7c3aed); /* Indigo to Purple gradient */
+        .neon-btn {
+            background: linear-gradient(90deg, #ff6ec4, #7873f5);
+            box-shadow: 0 4px 15px rgba(255, 110, 196, 0.5);
             transition: all 0.3s ease;
-             border-radius: 0.5rem;
-             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            border-radius: 0.75rem; 
+            width: 100%;
+            padding-top: 0.75rem; 
+            padding-bottom: 0.75rem; 
+            font-weight: 600; 
+            color: white;
         }
-        .submit-button:hover {
-            transform: translateY(-2px) scale(1.02);
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-             filter: brightness(1.1);
+        .neon-btn:hover {
+            transform: scale(1.05) translateY(-2px); 
+            box-shadow: 0 6px 25px rgba(255, 110, 196, 0.8);
         }
-        .submit-button:active {
-             transform: translateY(0) scale(1);
+         .neon-btn:active {
+             transform: scale(1) translateY(0); 
+        }
+
+
+        .bubble {
+            position: absolute;
+            border-radius: 50%;
+            opacity: 0.2; 
+            background: white;
+            animation: float 15s linear infinite;
+            pointer-events: none; 
+            bottom: -150px; 
+        }
+
+        @keyframes float {
+            0% {
+                transform: translateY(0) scale(1); 
+                opacity: 0;
+            }
+            10%, 90% { 
+                opacity: 0.2;
+            }
+            100% {
+                transform: translateY(-120vh) scale(0.5); 
+                opacity: 0;
+            }
         }
 
         .alert-box {
              border-radius: 0.5rem;
              animation: fadeIn 0.5s ease forwards;
              opacity: 0;
+             margin-bottom: 1.5rem; 
+             padding: 0.75rem 1rem; 
+             font-size: 0.875rem; 
+             color: white; 
+             position: relative; 
+             z-index: 10; 
         }
         .alert-box.alert-danger {
-            background-color: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c;
+            background-color: rgba(239, 68, 68, 0.3); 
+            border: 1px solid rgba(252, 165, 165, 0.5); 
         }
         .alert-box.alert-info {
-            background-color: #dbeafe; border: 1px solid #93c5fd; color: #1e40af;
+            background-color: rgba(59, 130, 246, 0.3); 
+            border: 1px solid rgba(147, 197, 253, 0.5); 
         }
         @keyframes fadeIn {
              from { opacity: 0; transform: translateY(-10px); }
              to { opacity: 1; transform: translateY(0); }
         }
-
     </style>
 </head>
-<body> <div class="login-card">
-        <h2 class="text-3xl font-bold text-center text-gray-900 mb-2">Obs Engine</h2> <p class="text-sm text-center text-gray-600 mb-8">Đăng nhập để tiếp tục</p> {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            {% for category, message in messages %}
-              <div class="alert-box {{ 'alert-danger' if category == 'danger' else 'alert-info' }} px-4 py-3 mb-5 text-sm" role="alert"> <span class="block sm:inline">{{ message }}</span>
-              </div>
-            {% endfor %}
-          {% endif %}
+<body>
+    <script>
+        function createBubbles() {
+            const body = document.body;
+            const existingBubbles = document.querySelectorAll('.bubble');
+            existingBubbles.forEach(b => b.remove()); 
+
+            const bubbleCount = 25; 
+            for (let i = 0; i < bubbleCount; i++) {
+                const bubble = document.createElement('div');
+                bubble.className = 'bubble';
+                const size = Math.random() * 60 + 20; 
+                bubble.style.width = `${size}px`;
+                bubble.style.height = bubble.style.width;
+                bubble.style.left = `${Math.random() * 100}vw`;
+                bubble.style.animationDuration = `${10 + Math.random() * 20}s`;
+                bubble.style.animationDelay = `${Math.random() * 5}s`;
+                body.appendChild(bubble);
+            }
+        }
+        createBubbles(); 
+    </script>
+
+    <div class="glass-card p-8 md:p-10">
+        <h2 class="text-white text-3xl md:text-4xl font-bold text-center mb-8 drop-shadow-md">Obs Engine</h2>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                <div class="alert-box {{ 'alert-danger' if category == 'danger' else 'alert-info' }}" role="alert">
+                    <span class="block sm:inline">{{ message }}</span>
+                </div>
+                {% endfor %}
+            {% endif %}
         {% endwith %}
 
-
-        <form method="POST" action="{{ url_for('login') }}">
-            <div class="mb-5">
-                <label for="username" class="block text-sm font-medium text-gray-700 mb-1">Tên đăng nhập</label> <input type="text" name="username" id="username" required
-                       class="form-input shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm"> </div>
-            <div class="mb-6">
-                <label for="password" class="block text-sm font-medium text-gray-700 mb-1">Mật khẩu</label> <input type="password" name="password" id="password" required
-                       class="form-input shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm"> </div>
-            <div class="flex items-center justify-between mb-8">
-                <div class="flex items-center">
-                    <input id="remember" name="remember" type="checkbox" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"> <label for="remember" class="ml-2 block text-sm text-gray-900"> Ghi nhớ đăng nhập</label> </div>
+        <form method="POST" action="{{ url_for('login') }}" class="space-y-6">
+            <div>
+                <label for="username" class="block text-white mb-2 text-sm">Tên đăng nhập</label>
+                <input type="text" name="username" id="username" required
+                       class="glow-input placeholder-white/60" placeholder="Nhập tên đăng nhập">
             </div>
             <div>
-                <button type="submit"
-                        class="submit-button w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"> Đăng nhập
+                <label for="password" class="block text-white mb-2 text-sm">Mật khẩu</label>
+                <input type="password" name="password" id="password" required
+                       class="glow-input placeholder-white/60" placeholder="Nhập mật khẩu">
+            </div>
+            <div class="flex items-center justify-between text-sm">
+                <div class="flex items-center">
+                    <input id="remember" name="remember" type="checkbox" class="h-4 w-4 text-pink-400 focus:ring-pink-500 border-white/30 rounded bg-white/10">
+                    <label for="remember" class="ml-2 block text-white/80">Ghi nhớ đăng nhập</label>
+                </div>
+                <a href="#" class="font-medium text-white/80 hover:text-white hover:underline">Quên mật khẩu?</a>
+            </div>
+            <div>
+                <button type="submit" class="neon-btn">
+                    Đăng nhập
                 </button>
             </div>
         </form>
     </div>
-     </body>
+</body>
 </html>
