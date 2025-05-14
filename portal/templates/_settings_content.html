@@ -1,0 +1,88 @@
+<section id="settings-content" class="content-section hidden">
+    <header class="mb-6">
+        <h2 class="text-2xl font-semibold text-gray-800">Cài đặt Toàn cục</h2> <p class="text-sm text-gray-500">Quản lý cấu hình chung cho hệ thống.</p>
+    </header>
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-6 space-y-8">
+
+        <div class="config-section">
+             <h3 class="text-xl font-semibold mb-4 text-gray-700">Cấu hình Telegram</h3>
+             <div class="space-y-4">
+                 <div class="flex items-center justify-between mb-4">
+                     <label for="enable-telegram-toggle" class="form-label mb-0">Bật cảnh báo Telegram</label>
+                     <label class="toggle-switch">
+                         <input type="checkbox" id="enable-telegram-toggle">
+                         <span class="toggle-slider"></span>
+                     </label>
+                 </div>
+                 <p class="form-description -mt-3 mb-4">Bật để gửi cảnh báo đến Telegram khi có sự cố.</p>
+                 <div>
+                     <label for="telegram-token" class="form-label">Bot Token</label>
+                     <input type="password" id="telegram-token" name="telegram_bot_token" placeholder="Để trống nếu không thay đổi" class="form-input w-full">
+                     <p class="form-description">Token của Telegram Bot dùng để gửi cảnh báo.</p>
+                 </div>
+                  <div>
+                     <label for="telegram-chat-id" class="form-label">Chat ID</label>
+                     <input type="text" id="telegram-chat-id" name="telegram_chat_id" placeholder="Nhập Chat ID (ví dụ: -100123... hoặc ID người dùng)" class="form-input w-full">
+                     <p class="form-description">ID của group hoặc người dùng nhận cảnh báo.</p>
+                 </div>
+             </div>
+             <div class="flex justify-end items-center pt-6">
+                  <span id="save-telegram-config-status" class="text-sm mr-4 hidden"></span>
+                  <button id="save-telegram-config-button" class="bg-teal-600 hover:bg-teal-700 text-white font-semibold py-2 px-5 rounded-lg shadow transition duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+                      Lưu Cấu hình Telegram
+                  </button>
+             </div>
+         </div>
+
+        <div class="config-section">
+             <h3 class="text-xl font-semibold mb-4 text-gray-700">Cấu hình Phân tích AI</h3>
+             <div class="space-y-4">
+                 <div class="flex items-center justify-between">
+                     <label for="enable-ai-toggle" class="form-label mb-0">Bật Phân tích AI</label>
+                     <label class="toggle-switch">
+                         <input type="checkbox" id="enable-ai-toggle">
+                         <span class="toggle-slider"></span>
+                     </label>
+                 </div>
+                 <div id="ai-provider-options" class="space-y-4 mt-4 hidden">
+                     <div>
+                         <label for="ai-provider-select" class="form-label">AI Provider</label>
+                         <select id="ai-provider-select" name="ai_provider" class="form-select mt-1 block w-full">
+                             <option value="gemini">Google Gemini</option>
+                             <option value="local">Local Model</option>
+                             <option value="openai" disabled>OpenAI (Chưa hỗ trợ)</option>
+                             <option value="groq" disabled>Groq (Chưa hỗ trợ)</option>
+                             <option value="deepseek" disabled>Deepseek (Chưa hỗ trợ)</option>
+                             {# Loại bỏ option value="none" #}
+                         </select>
+                     </div>
+                      <div class="model-id-field"> {# Giữ nguyên class này #}
+                         <label for="ai-model-identifier" class="form-label">Model Identifier</label>
+                         <input type="text" name="ai_model_identifier" id="ai-model-identifier" placeholder="Ví dụ: gemini-1.5-flash"
+                                class="form-input mt-1 block w-full">
+                          <p class="form-description">Nhập tên model cụ thể (ví dụ: gemini-1.5-flash, gpt-4o, ...). Không cần thiết cho 'Local Model'.</p> {# Cập nhật mô tả #}
+                     </div>
+                      {# Thêm trường mới cho Local Endpoint URL #}
+                      <div class="local-endpoint-field hidden"> {# Thêm class mới và ẩn ban đầu #}
+                         <label for="local-gemini-endpoint" class="form-label">Local Model Endpoint URL</label>
+                         <input type="url" name="local_gemini_endpoint" id="local-gemini-endpoint" placeholder="Ví dụ: http://localhost:8000/v1/chat/completions"
+                                class="form-input mt-1 block w-full">
+                         <p class="form-description">URL của API endpoint cho model AI đang chạy local.</p>
+                     </div>
+                      <div class="api-key-field"> {# Giữ nguyên class này #}
+                         <label for="ai-api-key" class="form-label">API Key</label>
+                         <input type="password" name="ai_api_key" id="ai-api-key" placeholder="Để trống nếu không thay đổi"
+                                class="form-input mt-1 block w-full">
+                         <p class="form-description">Nhập API key nếu provider yêu cầu. Không cần thiết cho 'Local Model'.</p> {# Cập nhật mô tả #}
+                     </div>
+                 </div>
+                 <div class="flex justify-end items-center pt-4">
+                      <span id="save-ai-config-status" class="text-sm mr-4 hidden"></span>
+                      <button id="save-ai-config-button" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-5 rounded-lg shadow transition duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+                          Lưu Cấu hình AI
+                      </button>
+                 </div>
+             </div>
+         </div>
+     </div>
+</section>

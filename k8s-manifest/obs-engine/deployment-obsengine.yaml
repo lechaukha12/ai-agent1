@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: obs-engine
+  namespace: kube-observability
+  labels:
+    app: obs-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: obs-engine
+  template:
+    metadata:
+      labels:
+        app: obs-engine
+    spec:
+      serviceAccountName: obs-engine-sa
+      volumes:
+        - name: obsengine-data
+          persistentVolumeClaim:
+            claimName: obs-engine-data-pvc
+      containers:
+        - name: obsengine-server
+          image: codebuild.alfinac.com:4444/library/obsengine:v1.0.7 # Updated image
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: obs-engine-config
+            - secretRef:
+                name: obs-engine-secret
+          env:
+            - name: TZ
+              value: Asia/Ho_Chi_Minh
+            - name: DB_PATH
+              value: "/data/obsengine_data.db"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: FLASK_DEBUG
+              value: "false"
+          volumeMounts:
+            - name: obsengine-data
+              mountPath: /data
+          resources:
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      securityContext:
+        runAsUser: 1002
+        runAsNonRoot: true
+        fsGroup: 1002
+      schedulerName: default-scheduler
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: obs-engine-service
+  namespace: kube-observability
+  labels:
+    app: obs-engine
+spec:
+  selector:
+    app: obs-engine
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

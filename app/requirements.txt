@@ -1,4 +1,5 @@
 requests
-google-generativeai
 python-dotenv
-kubernetes
+kubernetes_asyncio
+aiohttp # Cho các request HTTP bất đồng bộ (Loki, ObsEngine)
+# retry # Tạm thời bỏ retry, sẽ implement retry logic trong code async

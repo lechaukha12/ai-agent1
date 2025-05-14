@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: obs-engine-be
+  namespace: kube-observability
+  labels:
+    app: obs-engine-be
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: obs-engine-be
+  template:
+    metadata:
+      labels:
+        app: obs-engine-be
+    spec:
+      volumes:
+      - name: obsengine-be-auth-data
+        persistentVolumeClaim:
+          claimName: obs-engine-be-auth-data-pvc # Trỏ đến PVC mới cho Auth DB
+
+      containers:
+      - name: obs-engine-be-server
+        image: codebuild.alfinac.com:4444/library/obsengine-be:v1.0.7
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+        env:
+        - name: TZ
+          value: Asia/Ho_Chi_Minh
+        - name: OBS_ENGINE_API_URL # URL của ObsEngine API
+          value: "http://obs-engine-service.kube-observability.svc.cluster.local:8080"
+        - name: BE_DB_PATH # Đường dẫn DB User trên Volume mới
+          value: "/auth-data/be_users.db"
+        # - name: FLASK_SECRET_KEY # Có thể cần cho session/flash messages
+        #   valueFrom:
+        #     secretKeyRef:
+        #       name: obs-engine-be-secret # Tạo Secret riêng nếu cần
+        #       key: flask-secret-key
+        volumeMounts:
+        - name: obsengine-be-auth-data # Mount Volume mới
+          mountPath: /auth-data        # Vào thư mục /auth-data
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "128Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+
+      securityContext:
+        runAsUser: 1004
+        runAsNonRoot: true
+        fsGroup: 1004 # Cần để ghi vào /auth-data
+
+      schedulerName: default-scheduler
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: obs-engine-be-svc
+  namespace: kube-observability
+  labels:
+    app: obs-engine-be
+spec:
+  selector:
+    app: obs-engine-be
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5000

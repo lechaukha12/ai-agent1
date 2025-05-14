@@ -1,0 +1,280 @@
+/* portal/static/css/style.css */
+body {
+    font-family: 'Inter', sans-serif;
+    scroll-behavior: smooth;
+}
+
+/* Thanh cuộn tùy chỉnh */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background-color: rgba(156, 163, 175, 0.5); /* gray-400 with alpha */
+    border-radius: 20px;
+    border: 3px solid transparent;
+}
+::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(156, 163, 175, 0.7); /* gray-400 with more alpha on hover */
+}
+
+/* --- Kiểu hiệu ứng Loading MỚI --- */
+
+#loading-overlay {
+    position: fixed; /* Bao phủ toàn bộ màn hình */
+    inset: 0; /* top, right, bottom, left = 0 */
+    background-color: rgba(255, 255, 255, 0.6); /* Màu trắng hơi trong suốt */
+    backdrop-filter: blur(4px); /* Thêm hiệu ứng blur */
+    -webkit-backdrop-filter: blur(4px); /* Hỗ trợ Safari */
+    display: flex; /* Sử dụng flexbox để căn giữa spinner */
+    align-items: center; /* Căn giữa theo chiều dọc */
+    justify-content: center; /* Căn giữa theo chiều ngang */
+    z-index: 100; /* Đặt lên trên cùng */
+    opacity: 1;
+    transition: opacity 0.3s ease-in-out; /* Hiệu ứng mờ dần khi ẩn */
+    pointer-events: none; /* Cho phép click xuyên qua khi ẩn */
+}
+
+/* Cho phép chặn click khi overlay hiện */
+#loading-overlay:not(.hidden) {
+    pointer-events: auto;
+}
+
+/* Ẩn overlay (và spinner bên trong) */
+#loading-overlay.hidden {
+    opacity: 0;
+}
+
+/* Spinner kiểu bouncing dots */
+.loading-spinner-container {
+    /* Container cho các dấu chấm */
+    width: 70px; /* Chiều rộng của container */
+    text-align: center;
+    /* Bỏ z-index: 101; vì spinner giờ là con của overlay */
+    /* Overlay đã dùng flexbox để căn giữa */
+}
+
+/* CSS cho từng dấu chấm */
+.loading-spinner-container > div {
+    width: 16px; /* Kích thước dấu chấm */
+    height: 16px;
+    background-color: #3b82f6; /* Màu xanh dương (Tailwind blue-500) */
+    border-radius: 100%;
+    display: inline-block;
+    /* Áp dụng animation */
+    animation: sk-bouncedelay 1.4s infinite ease-in-out both;
+    margin: 0 2px; /* Khoảng cách giữa các dấu chấm */
+}
+
+/* Delay animation cho từng dấu chấm */
+.loading-spinner-container .bounce1 {
+    animation-delay: -0.32s;
+}
+
+.loading-spinner-container .bounce2 {
+    animation-delay: -0.16s;
+}
+
+/* .bounce3 không cần delay */
+
+/* Định nghĩa animation */
+@keyframes sk-bouncedelay {
+    0%, 80%, 100% {
+        transform: scale(0); /* Bắt đầu, cuối và gần cuối: co lại */
+    }
+    40% {
+        transform: scale(1.0); /* Giữa chừng: phình to */
+    }
+}
+
+/* --- KẾT THÚC Kiểu hiệu ứng Loading MỚI --- */
+
+
+/* --- Các kiểu khác --- */
+.chart-container {
+    min-height: 280px;
+    position: relative;
+}
+#incidents-table th, #incidents-table td {
+    padding: 0.75rem 1rem;
+}
+#incidents-table tbody tr {
+    transition: background-color 0.1s ease-in-out;
+    cursor: pointer;
+}
+#incidents-table tbody tr:hover {
+    background-color: rgba(0, 0, 0, 0.03); /* Giữ lại hover sáng màu cho bảng */
+}
+
+/* --- Cập nhật Kiểu Sidebar --- */
+.sidebar-item {
+    /* Màu chữ mặc định đã được đặt trong HTML (text-gray-300) */
+    /* Màu hover đã được đặt trong HTML (hover:bg-gray-700 hover:text-white) */
+}
+.sidebar-item svg {
+    width: 1.25rem;
+    height: 1.25rem;
+    margin-right: 0.75rem;
+    color: #9ca3af; /* Tailwind gray-400 cho icon */
+}
+/* Kiểu cho mục sidebar đang active */
+.sidebar-item.active {
+    background-color: #374151; /* Tailwind gray-700 làm nền active */
+    color: #ffffff; /* Chữ trắng */
+    font-weight: 500;
+}
+/* Đảm bảo icon cũng đổi màu khi active */
+.sidebar-item.active svg {
+    color: #ffffff; /* Icon trắng */
+}
+/* --- Kết thúc Cập nhật Kiểu Sidebar --- */
+
+.config-section {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid #e5e7eb; /* Tailwind gray-200 */
+}
+.config-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 28px;
+}
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+    border-radius: 34px;
+}
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 20px;
+    width: 20px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+input:checked + .toggle-slider {
+    background-color: #2563eb; /* Tailwind blue-600 */
+}
+input:focus + .toggle-slider {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4); /* Focus ring */
+}
+input:checked + .toggle-slider:before {
+    transform: translateX(22px);
+}
+.form-input, .form-select, .form-multiselect {
+    background-color: #fff;
+    border: 1px solid #d1d5db; /* Tailwind gray-300 */
+    color: #1f2937; /* Tailwind gray-800 */
+    border-radius: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+.form-input:focus, .form-select:focus, .form-multiselect:focus {
+    border-color: #3b82f6; /* Tailwind blue-500 */
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
+    outline: none;
+}
+.form-select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%239ca3af' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 1.5em 1.5em;
+    padding-right: 2.5rem;
+}
+.form-label {
+    display: block;
+    text-sm font-medium text-gray-700 mb-1;
+}
+.form-description {
+    margin-top: 0.25rem;
+    text-xs text-gray-500;
+}
+
+/* Kiểu Modal */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 90; /* Thấp hơn overlay loading */
+    transition: opacity 0.3s ease;
+    opacity: 0;
+    pointer-events: none;
+}
+.modal-content {
+    background-color: white;
+    border-radius: 0.75rem;
+    padding: 1.5rem 2rem;
+    max-width: 90%;
+    width: 850px; /* Chiều rộng Modal Sự cố */
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    transform: scale(0.95);
+    transition: transform 0.3s ease;
+}
+/* Chiều rộng cụ thể cho các modal khác nhau */
+#create-user-modal .modal-content,
+#edit-user-modal .modal-content {
+    width: 550px; /* Chiều rộng nhỏ hơn cho modal user */
+}
+
+.modal-overlay.modal-visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+.modal-overlay.modal-visible .modal-content {
+    transform: scale(1);
+}
+
+.modal-section { margin-bottom: 1.25rem; }
+.modal-label { font-weight: 600; color: #4b5563; margin-bottom: 0.35rem; display: block; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.modal-value { font-family: 'Fira Code', monospace; white-space: pre-wrap; word-wrap: break-word; background-color: #f3f4f6; padding: 0.75rem; border-radius: 0.375rem; font-size: 0.875rem; max-height: 250px; overflow-y: auto; border: 1px solid #e5e7eb; }
+.modal-value-simple { font-size: 0.95rem; color: #1f2937; margin-top: 0.1rem; }
+.modal-value-block { display: block; }
+.severity-badge { padding: 0.2rem 0.6rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; display: inline-block; line-height: 1.2; }
+.severity-critical { background-color: #fee2e2; color: #dc2626; } /* red */
+.severity-error { background-color: #ffedd5; color: #f97316; } /* orange */
+.severity-warning { background-color: #fef9c3; color: #ca8a04; } /* yellow */
+.severity-info { background-color: #dbeafe; color: #2563eb; } /* blue */
+.severity-unknown { background-color: #e5e7eb; color: #4b5563; } /* gray */
+
+/* Kiểu danh sách namespace */
+.namespace-list { max-height: 300px; overflow-y: auto; }
+.namespace-item { transition: background-color 0.15s ease-in-out; padding: 0.3rem 0.5rem; border-radius: 0.25rem;}
+.namespace-item:hover { background-color: #f9fafb; } /* gray-50 */
+
+/* Đảm bảo các modal nằm dưới overlay loading */
+#create-user-modal, #edit-user-modal, #incident-modal {
+    z-index: 90; /* Thấp hơn overlay loading (z-index 100) */
+}

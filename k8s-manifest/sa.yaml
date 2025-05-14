@@ -1,5 +1,0 @@
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: k8s-log-agent-sa # Đổi tên Service Account
-  namespace: kube-observability # Đổi namespace của agent

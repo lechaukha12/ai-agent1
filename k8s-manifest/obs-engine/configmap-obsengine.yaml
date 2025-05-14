@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: obs-engine-config
+  namespace: kube-observability
+data:
+  STATS_UPDATE_INTERVAL_SECONDS: "300"
+  DEFAULT_ENABLE_AI_ANALYSIS: "true"
+  DEFAULT_AI_PROVIDER: "gemini"
+  DEFAULT_AI_MODEL_IDENTIFIER: "gemini-1.5-flash"
+  DEFAULT_LOCAL_GEMINI_ENDPOINT: ""
+
+  DEFAULT_ENABLE_TELEGRAM_ALERTS: "false"
+  DEFAULT_ALERT_SEVERITY_LEVELS: "WARNING,ERROR,CRITICAL"
+  DEFAULT_ALERT_COOLDOWN_MINUTES: "30"
+
+  DEFAULT_PROMPT_TEMPLATE: |
+    Phân tích tình huống của pod Kubernetes '{namespace}/{pod_name}'.
+    **Ưu tiên xem xét ngữ cảnh Kubernetes** được cung cấp dưới đây vì nó có thể là lý do chính bạn được gọi.
+    Kết hợp với các dòng log sau đây (nếu có) để đưa ra phân tích đầy đủ.
+
+    1.  Xác định mức độ nghiêm trọng tổng thể (chọn một: INFO, WARNING, ERROR, CRITICAL).
+    2.  Nếu mức độ nghiêm trọng là WARNING, ERROR hoặc CRITICAL:
+        a. Cung cấp một bản tóm tắt ngắn gọn (1-2 câu) bằng **tiếng Việt** giải thích vấn đề cốt lõi.
+        b. Đề xuất **nguyên nhân gốc có thể xảy ra** (potential root causes) (ngắn gọn, dạng gạch đầu dòng nếu có nhiều).
+        c. Đề xuất các **bước khắc phục sự cố** (suggested troubleshooting steps) (ngắn gọn, dạng gạch đầu dòng).
+
+    Ngữ cảnh Kubernetes:
+    --- START CONTEXT ---
+    {k8s_context}
+    --- END CONTEXT ---
+
+    Các dòng log (có thể không có):
+    --- START LOGS ---
+    {log_text}
+    --- END LOGS ---
+
+    Chỉ trả lời bằng định dạng JSON với các khóa "severity", "summary", "root_cause", và "troubleshooting_steps".
+    Ví dụ:
+    {{
+      "severity": "CRITICAL",
+      "summary": "Pod 'kube-system/oomkill-pod' bị Terminated với lý do OOMKilled.",
+      "root_cause": "- Giới hạn bộ nhớ (memory limit) quá thấp.\n- Ứng dụng bị rò rỉ bộ nhớ (memory leak).",
+      "troubleshooting_steps": "- Tăng memory limit cho pod.\n- Phân tích memory profile của ứng dụng.\n- Kiểm tra lại logic cấp phát/giải phóng bộ nhớ trong code."
+    }}

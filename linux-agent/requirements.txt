@@ -1,0 +1,5 @@
+aiohttp
+python-dotenv
+psutil
+aiofiles
+# python-systemd # Optional: For native journal reading, may require system packages

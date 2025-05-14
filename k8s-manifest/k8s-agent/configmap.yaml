@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-log-agent-config
+  namespace: kube-observability
+data:
+  LOKI_URL: "http://loki-loki-distributed-query-frontend:3100"
+  OBS_ENGINE_URL: "http://obs-engine-service.kube-observability.svc.cluster.local:8080/collect"
+  SCAN_INTERVAL_SECONDS: "30"
+  NAMESPACE_REFRESH_INTERVAL_SECONDS: "3600"
+  CONFIG_REFRESH_INTERVAL_SECONDS: "60"
+  LOKI_SCAN_RANGE_MINUTES: "1"
+  LOKI_DETAIL_LOG_RANGE_MINUTES: "30"
+  LOKI_QUERY_LIMIT: "500"
+  LOKI_SCAN_MIN_LEVEL: "INFO"
+  EXCLUDED_NAMESPACES: "kube-node-lease,kube-public"
+  DEFAULT_MONITORED_NAMESPACES: "kube-system,default"
+  RESTART_COUNT_THRESHOLD: "5"
